@@ -1,0 +1,9 @@
+name = "ai-news-digest"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+# Non-sensitive defaults (override in Cloudflare dashboard for secrets)
+# MAILJET_API_KEY = "set-in-dashboard"
+# MAILJET_SECRET_KEY = "set-in-dashboard"
+# AUTH_TOKEN = "set-in-dashboard"
