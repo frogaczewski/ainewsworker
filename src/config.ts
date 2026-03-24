@@ -32,9 +32,7 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Meduza', url: 'https://meduza.io/rss/en/all', category: 'global' },
   { name: 'Moscow Times', url: 'https://www.themoscowtimes.com/rss/news', category: 'global' },
 
-  // Asia-Pacific
-  { name: 'NHK World', url: 'https://www3.nhk.or.jp/nhkworld/en/news/list.xml', category: 'global' },
-  { name: 'Straits Times', url: 'https://www.straitstimes.com/news/rss.xml', category: 'global' },
+  // Asia-Pacific (NHK removed — returns 404)
   { name: 'Nikkei Asia', url: 'https://asia.nikkei.com/rss/feed/nar', category: 'business' },
   { name: 'Times of India', url: 'https://timesofindia.indiatimes.com/rssfeedstopstories.cms', category: 'global' },
   { name: 'The Hindu', url: 'https://www.thehindu.com/news/international/feeder/default.rss', category: 'global' },
@@ -49,8 +47,7 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Rzeczpospolita', url: 'https://www.rp.pl/rss_main', category: 'poland' },
   { name: 'Notes From Poland', url: 'https://notesfrompoland.com/feed/', category: 'poland' },
 
-  // Nepal
-  { name: 'Himalayan Times', url: 'https://www.thehimalayantimes.com/feed/', category: 'nepal' },
+  // Nepal (Himalayan Times removed — returns 404)
 
   // Cyprus
   { name: 'Cyprus Mail', url: 'https://cyprus-mail.com/feed/', category: 'cyprus' },

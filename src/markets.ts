@@ -1,21 +1,11 @@
 import { MARKET_TICKERS, CURRENCY_PAIRS } from './config';
 import type { MarketQuote, CurrencyRate, MarketData } from './types';
 
-interface YahooQuoteResult {
-  quoteResponse?: {
-    result?: Array<{
-      symbol?: string;
-      regularMarketPrice?: number;
-      regularMarketChangePercent?: number;
-      regularMarketPreviousClose?: number;
-    }>;
-  };
-}
-
 interface YahooChartResult {
   chart?: {
     result?: Array<{
       meta?: {
+        symbol?: string;
         regularMarketPrice?: number;
         chartPreviousClose?: number;
         previousClose?: number;
@@ -24,55 +14,14 @@ interface YahooChartResult {
   };
 }
 
-// Batch fetch all tickers in a single request using the quote endpoint
-async function fetchYahooQuotesBatch(tickers: typeof MARKET_TICKERS): Promise<MarketQuote[]> {
-  try {
-    const symbols = tickers.map(t => t.symbol).join(',');
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
-    const response = await fetch(url, {
-      headers: { 'User-Agent': 'DailyNewsDigest/2.0' },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const data = await response.json() as YahooQuoteResult;
-    const results = data.quoteResponse?.result ?? [];
-
-    return tickers.map(ticker => {
-      const quote = results.find(r => r.symbol === ticker.symbol);
-      if (quote?.regularMarketPrice) {
-        return {
-          name: ticker.name,
-          symbol: ticker.symbol,
-          price: Math.round(quote.regularMarketPrice * 100) / 100,
-          change: Math.round((quote.regularMarketChangePercent ?? 0) * 100) / 100,
-        };
-      }
-      return {
-        name: ticker.name,
-        symbol: ticker.symbol,
-        price: null,
-        change: null,
-        error: 'No data in batch response',
-      };
-    });
-  } catch (err) {
-    console.log(`[Markets] Batch Yahoo quote failed: ${err instanceof Error ? err.message : err}`);
-    // Fallback: try chart API individually (costs more subrequests)
-    return fetchYahooQuotesIndividual(tickers);
-  }
-}
-
-// Fallback: fetch one at a time via chart API
-async function fetchYahooQuotesIndividual(tickers: typeof MARKET_TICKERS): Promise<MarketQuote[]> {
-  console.log('[Markets] Falling back to individual chart API calls');
+// Fetch all tickers via Yahoo Finance chart API — one request per ticker
+// Uses Promise.all so they run in parallel (counts as N subrequests but same wall-clock)
+async function fetchYahooQuotes(tickers: typeof MARKET_TICKERS): Promise<MarketQuote[]> {
   return Promise.all(tickers.map(async (ticker): Promise<MarketQuote> => {
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker.symbol}?interval=1d&range=2d`;
       const response = await fetch(url, {
-        headers: { 'User-Agent': 'DailyNewsDigest/2.0' },
+        headers: { 'User-Agent': 'Mozilla/5.0' },
       });
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -105,7 +54,6 @@ async function fetchYahooQuotesIndividual(tickers: typeof MARKET_TICKERS): Promi
 }
 
 async function fetchCurrencyRates(pairs: typeof CURRENCY_PAIRS): Promise<CurrencyRate[]> {
-  // Fetch each pair (can't easily batch different base currencies)
   return Promise.all(pairs.map(async (pair): Promise<CurrencyRate> => {
     try {
       const url = `https://api.frankfurter.app/latest?from=${pair.from}&to=${pair.to}`;
@@ -134,8 +82,8 @@ async function fetchCurrencyRates(pairs: typeof CURRENCY_PAIRS): Promise<Currenc
 
 export async function fetchMarketData(): Promise<MarketData> {
   const [quotes, currencies] = await Promise.all([
-    fetchYahooQuotesBatch(MARKET_TICKERS),  // 1 request (instead of 5)
-    fetchCurrencyRates(CURRENCY_PAIRS),      // 2 requests
+    fetchYahooQuotes(MARKET_TICKERS),   // 5 requests
+    fetchCurrencyRates(CURRENCY_PAIRS), // 2 requests
   ]);
 
   return { quotes, currencies };
