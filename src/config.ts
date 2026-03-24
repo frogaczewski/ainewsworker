@@ -32,7 +32,8 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Meduza', url: 'https://meduza.io/rss/en/all', category: 'global' },
   { name: 'Moscow Times', url: 'https://www.themoscowtimes.com/rss/news', category: 'global' },
 
-  // Asia-Pacific (NHK removed — returns 404)
+  // Asia-Pacific
+  { name: 'Straits Times', url: 'https://www.straitstimes.com/news/rss.xml', category: 'global' },
   { name: 'Nikkei Asia', url: 'https://asia.nikkei.com/rss/feed/nar', category: 'business' },
   { name: 'Times of India', url: 'https://timesofindia.indiatimes.com/rssfeedstopstories.cms', category: 'global' },
   { name: 'The Hindu', url: 'https://www.thehindu.com/news/international/feeder/default.rss', category: 'global' },

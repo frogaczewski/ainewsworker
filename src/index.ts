@@ -56,36 +56,61 @@ async function runPipeline(env: Env): Promise<string> {
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.log(`[Pipeline] Haiku triage failed: ${errMsg}`);
-    console.log(`[Pipeline] Falling back to raw items for Sonnet`);
-    // No retry — conserve subrequest budget
-    triagedStories = sortedItems.slice(0, 100).map(item => ({
-      headline: item.title,
-      summary: item.summary,
-      source: item.source,
-      country_tags: [],
-      category_tags: [],
-      importance: 'medium' as const,
-      duplicate_of: null,
-    }));
+    console.log(`[Pipeline] Retrying once...`);
+    try {
+      const triagePrompt = buildTriagePrompt(sortedItems);
+      const triageResponse = await callHaiku(env, triagePrompt);
+      triagedStories = parseTriageResponse(triageResponse);
+      console.log(`[Pipeline] Triage retry selected ${triagedStories.length} stories`);
+    } catch (retryErr) {
+      const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+      console.log(`[Pipeline] Haiku retry also failed: ${retryMsg}`);
+      console.log(`[Pipeline] Falling back to raw items for Sonnet`);
+      triagedStories = sortedItems.slice(0, 100).map(item => ({
+        headline: item.title,
+        summary: item.summary,
+        source: item.source,
+        country_tags: [],
+        category_tags: [],
+        importance: 'medium' as const,
+        duplicate_of: null,
+      }));
+    }
   }
 
   // Step 5: Sonnet compilation
   console.log('[Pipeline] Step 5: Compiling digest with Sonnet...');
   let digest: string;
 
-  const compilationPrompt = buildCompilationPrompt(
-    triagedStories,
-    weather,
-    markets,
-    { total: feedResult.total, failed: feedResult.failed },
-  );
-  digest = await callSonnet(env, compilationPrompt);
+  try {
+    const compilationPrompt = buildCompilationPrompt(
+      triagedStories,
+      weather,
+      markets,
+      { total: feedResult.total, failed: feedResult.failed },
+    );
+    digest = await callSonnet(env, compilationPrompt);
+  } catch (err) {
+    console.log('[Pipeline] Sonnet compilation failed, retrying once...');
+    const compilationPrompt = buildCompilationPrompt(
+      triagedStories,
+      weather,
+      markets,
+      { total: feedResult.total, failed: feedResult.failed },
+    );
+    digest = await callSonnet(env, compilationPrompt);
+  }
 
   console.log(`[Pipeline] Digest compiled (${digest.length} characters)`);
 
   // Step 6: Send email
   console.log('[Pipeline] Step 6: Sending email...');
-  await sendDigestEmail(env, digest);
+  try {
+    await sendDigestEmail(env, digest);
+  } catch (err) {
+    console.log('[Pipeline] Email failed, retrying once...');
+    await sendDigestEmail(env, digest);
+  }
 
   console.log('[Pipeline] Daily digest sent successfully!');
   return 'success';
