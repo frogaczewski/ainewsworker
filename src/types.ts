@@ -2,6 +2,7 @@ export interface Env {
   CLAUDE_PLATFORM_API: string;
   MAILJET_API_KEY: string;
   MAILJET_SECRET_KEY: string;
+  TRIGGER_TOKEN?: string;
 }
 
 export interface RssFeedConfig {

@@ -1,9 +1,12 @@
-name = "ai-news-digest"
+name = "ainewsworker"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 
+[observability]
+enabled = true
+
 [triggers]
-crons = ["0 6 * * *"]  # 06:00 UTC daily (08:00 Cyprus, 07:00 Poland)
+crons = ["0 4 * * *"]  # 04:00 UTC daily (06:00 Cyprus, 05:00 Poland)
 
 # All secrets are already set in the Cloudflare dashboard:
 # CLAUDE_PLATFORM_API  — Anthropic API key

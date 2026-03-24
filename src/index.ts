@@ -178,8 +178,16 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // Manual trigger endpoint for testing
+    // Manual trigger endpoint
     if (url.pathname === '/run' && request.method === 'POST') {
+      // Simple auth: require ?token=<TRIGGER_TOKEN> or Authorization header
+      const token = url.searchParams.get('token') || request.headers.get('Authorization')?.replace('Bearer ', '');
+      if (env.TRIGGER_TOKEN && token !== env.TRIGGER_TOKEN) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       ctx.waitUntil(
         runPipeline(env).catch(async (err) => {
           const message = err instanceof Error ? err.message : String(err);
