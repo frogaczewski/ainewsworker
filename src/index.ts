@@ -6,16 +6,24 @@ import { buildTriagePrompt, buildCompilationPrompt } from './prompts';
 import { sendDigestEmail, sendErrorEmail } from './email';
 import type { Env, TriagedStory } from './types';
 
-async function runPipeline(env: Env): Promise<void> {
+async function runPipeline(env: Env): Promise<string> {
   console.log('[Pipeline] Starting daily news digest...');
 
   // Step 1-3: Fetch RSS, weather, and market data in parallel
   console.log('[Pipeline] Step 1-3: Fetching RSS feeds, weather, and market data...');
-  const [feedResult, weather, markets] = await Promise.all([
-    fetchAllFeeds(),
-    fetchWeather(),
-    fetchMarketData(),
-  ]);
+
+  let feedResult, weather, markets;
+  try {
+    [feedResult, weather, markets] = await Promise.all([
+      fetchAllFeeds(),
+      fetchWeather(),
+      fetchMarketData(),
+    ]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Pipeline] FATAL: Steps 1-3 failed: ${msg}`);
+    throw err;
+  }
 
   console.log(`[Pipeline] RSS: ${feedResult.items.length} items from ${feedResult.total - feedResult.failed}/${feedResult.total} feeds`);
   if (feedResult.errors.length > 0) {
@@ -105,6 +113,7 @@ async function runPipeline(env: Env): Promise<void> {
   }
 
   console.log('[Pipeline] Daily digest sent successfully!');
+  return 'success';
 }
 
 function parseTriageResponse(response: string): TriagedStory[] {
@@ -188,20 +197,28 @@ export default {
           headers: { 'Content-Type': 'application/json' },
         });
       }
-      ctx.waitUntil(
-        runPipeline(env).catch(async (err) => {
-          const message = err instanceof Error ? err.message : String(err);
-          console.error(`[Pipeline] Fatal error: ${message}`);
-          try {
-            await sendErrorEmail(env, message);
-          } catch (emailErr) {
-            console.error(`[Pipeline] Failed to send error email: ${emailErr}`);
-          }
-        })
-      );
-      return new Response(JSON.stringify({ status: 'Pipeline started' }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+
+      // Run pipeline synchronously so HTTP response contains the result/error
+      try {
+        const result = await runPipeline(env);
+        return new Response(JSON.stringify({ status: 'success', result }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const stack = err instanceof Error ? err.stack : undefined;
+        console.error(`[Pipeline] Fatal error: ${message}`);
+        console.error(`[Pipeline] Stack: ${stack}`);
+        try {
+          await sendErrorEmail(env, message);
+        } catch (emailErr) {
+          console.error(`[Pipeline] Failed to send error email: ${emailErr}`);
+        }
+        return new Response(JSON.stringify({ status: 'error', error: message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
     }
 
     if (url.pathname === '/test-email' && request.method === 'POST') {
