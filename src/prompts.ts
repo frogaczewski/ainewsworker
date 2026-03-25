@@ -86,7 +86,7 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 
 ---
 
-[For each country that has news (PL, CY, NP, CN, DE, FR, IT, ES, GB, US, EU), create a section with flag emoji + country name as an h3 header. Include as many or as few stories per country as the news warrants. You may skip countries like DE, FR, IT, ES if they have no standalone stories. IMPORTANT: Poland, Cyprus, and Nepal are the reader's home countries — ALWAYS include a section for each of these three, even if the stories are smaller or more local in nature. Cap the US section to 5-6 of the most important stories — do not include every US story.]
+[ALWAYS include a section for every country in this list: PL, CY, NP, CN, DE, FR, IT, ES, GB, US, EU — using flag emoji + country name as an h3 header. If a country has news, write the stories. If a country has no significant standalone stories today, still include the section with a brief note (e.g. "No major standalone stories today, though French outlets contributed coverage cited in other sections." or "A quiet news day from Nepal."). Cap the US section to 5-6 of the most important stories — do not include every US story.]
 
 ---
 
