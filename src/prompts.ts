@@ -30,7 +30,8 @@ Below are headlines and summaries from ~35 news sources published in the last 24
 4. CONFLICTING REPORTS: When sources report the same event with different framing, different facts, or contradictory narratives (e.g., Western vs non-Western media, right-wing vs left-wing outlets, global south vs developed world perspectives), set "conflicting": true and provide a brief "conflict_note" explaining the key difference (e.g., "Western sources emphasize sanctions impact, while Xinhua focuses on diplomatic overtures").
 
 5. Prioritize:
-   - Stories directly about Poland, Cyprus, Nepal, China, Germany, France, Italy, Spain, UK, US, EU
+   - MUST INCLUDE: Always select stories about Poland, Cyprus, and Nepal — these are the reader's home countries. Include at least 2-3 Nepal stories if any exist in the feed.
+   - Stories directly about China, Germany, France, Italy, Spain, UK, US, EU
    - Major global events (wars, elections, disasters, breakthroughs)
    - Technology/AI developments
    - Climate and environment
@@ -85,7 +86,7 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 
 ---
 
-[For each country that has news (PL, CY, NP, CN, DE, FR, IT, ES, GB, US, EU), create a section with flag emoji + country name as an h3 header. Include as many or as few stories per country as the news warrants. Skip countries with no significant news today. IMPORTANT: Cap the US section to 5-6 of the most important stories — do not include every US story.]
+[For each country that has news (PL, CY, NP, CN, DE, FR, IT, ES, GB, US, EU), create a section with flag emoji + country name as an h3 header. Include as many or as few stories per country as the news warrants. You may skip countries like DE, FR, IT, ES if they have no standalone stories. IMPORTANT: Poland, Cyprus, and Nepal are the reader's home countries — ALWAYS include a section for each of these three, even if the stories are smaller or more local in nature. Cap the US section to 5-6 of the most important stories — do not include every US story.]
 
 ---
 
