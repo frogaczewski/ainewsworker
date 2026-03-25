@@ -198,25 +198,28 @@ export default {
         });
       }
 
-      // Run pipeline in background — fetch handlers have a 30s wall-clock limit,
-      // but ctx.waitUntil() extends execution up to 15 minutes on paid plan
-      ctx.waitUntil(
-        runPipeline(env).catch(async (err) => {
-          const message = err instanceof Error ? err.message : String(err);
-          const stack = err instanceof Error ? err.stack : undefined;
-          console.error(`[Pipeline] Fatal error: ${message}`);
-          console.error(`[Pipeline] Stack: ${stack}`);
-          try {
-            await sendErrorEmail(env, message);
-          } catch (emailErr) {
-            console.error(`[Pipeline] Failed to send error email: ${emailErr}`);
-          }
-        })
-      );
-
-      return new Response(JSON.stringify({ status: 'started', message: 'Pipeline running in background. Check logs for progress.' }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      // Run synchronously — the response keeps the connection open, giving us
+      // the full wall-clock allowance. Streaming LLM calls keep it alive.
+      try {
+        const result = await runPipeline(env);
+        return new Response(JSON.stringify({ status: 'success', result }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const stack = err instanceof Error ? err.stack : undefined;
+        console.error(`[Pipeline] Fatal error: ${message}`);
+        console.error(`[Pipeline] Stack: ${stack}`);
+        try {
+          await sendErrorEmail(env, message);
+        } catch (emailErr) {
+          console.error(`[Pipeline] Failed to send error email: ${emailErr}`);
+        }
+        return new Response(JSON.stringify({ status: 'error', error: message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
     }
 
     if (url.pathname === '/test-email' && request.method === 'POST') {
