@@ -37,6 +37,17 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Nikkei Asia', url: 'https://asia.nikkei.com/rss/feed/nar', category: 'business' },
   { name: 'Times of India', url: 'https://timesofindia.indiatimes.com/rssfeedstopstories.cms', category: 'global' },
   { name: 'The Hindu', url: 'https://www.thehindu.com/news/international/feeder/default.rss', category: 'global' },
+  { name: 'Bangkok Post', url: 'https://www.bangkokpost.com/rss/data/topstories.xml', category: 'global' },
+  { name: 'The Daily Star', url: 'https://www.thedailystar.net/frontpage/rss.xml', category: 'global' },
+  { name: 'Rappler', url: 'https://www.rappler.com/feed/', category: 'global' },
+
+  // Africa
+  { name: 'Daily Maverick', url: 'https://www.dailymaverick.co.za/dmrss/', category: 'global' },
+  { name: 'The East African', url: 'https://www.theeastafrican.co.ke/tea/rss', category: 'global' },
+
+  // Latin America
+  { name: 'Buenos Aires Times', url: 'https://www.batimes.com.ar/feed', category: 'global' },
+  { name: 'MercoPress', url: 'https://en.mercopress.com/rss', category: 'global' },
 
   // Europe / EU
   { name: 'Politico EU', url: 'https://www.politico.eu/feed/', category: 'politics' },
@@ -48,7 +59,9 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Rzeczpospolita', url: 'https://www.rp.pl/rss_main', category: 'poland' },
   { name: 'Notes From Poland', url: 'https://notesfrompoland.com/feed/', category: 'poland' },
 
-  // Nepal (Himalayan Times removed — returns 404)
+  // Nepal
+  { name: 'Kathmandu Post', url: 'https://kathmandupost.com/rss', category: 'nepal' },
+  { name: 'Republica', url: 'https://myrepublica.nagariknetwork.com/rss', category: 'nepal' },
 
   // Cyprus
   { name: 'Cyprus Mail', url: 'https://cyprus-mail.com/feed/', category: 'cyprus' },

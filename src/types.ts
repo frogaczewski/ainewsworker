@@ -23,10 +23,13 @@ export interface TriagedStory {
   headline: string;
   summary: string;
   source: string;
+  link: string;
   country_tags: string[];
   category_tags: string[];
   importance: 'high' | 'medium';
   duplicate_of: number | null;
+  conflicting?: boolean;
+  conflict_note?: string;
 }
 
 export interface WeatherLocation {

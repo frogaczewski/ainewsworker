@@ -2,11 +2,16 @@ import { EMAIL_FROM, EMAIL_TO } from './config';
 import type { Env } from './types';
 
 function markdownToHtml(md: string): string {
+  // Handle blockquotes before HTML escaping
+  md = md.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+  // Merge consecutive blockquotes
+  md = md.replace(/<\/blockquote>\n<blockquote>/g, '\n');
+
   let html = md
-    // Escape HTML entities (but preserve markdown syntax)
+    // Escape HTML entities (but preserve markdown syntax and blockquotes)
     .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+    .replace(/<(?!\/?blockquote>)/g, '&lt;')
+    .replace(/(?<!blockquote)>/g, '&gt;')
     // Headers
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
@@ -65,6 +70,7 @@ th,thead tr th{background:#2563eb;color:white;padding:10px 14px;text-align:left;
 td{padding:8px 14px;border-bottom:1px solid #e5e7eb}
 tr:nth-child(even){background:#f3f4f6}
 ul{padding-left:20px}li{margin:4px 0}a{color:#2563eb}
+blockquote{border-left:4px solid #2563eb;margin:12px 0;padding:8px 16px;background:#f0f4ff;color:#374151}
 </style></head><body>${body}</body></html>`;
 }
 

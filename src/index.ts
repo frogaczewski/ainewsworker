@@ -70,6 +70,7 @@ async function runPipeline(env: Env): Promise<string> {
         headline: item.title,
         summary: item.summary,
         source: item.source,
+        link: item.link,
         country_tags: [],
         category_tags: [],
         importance: 'medium' as const,
