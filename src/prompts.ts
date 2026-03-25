@@ -37,7 +37,7 @@ Below are headlines and summaries from ~35 news sources published in the last 24
    - Climate and environment
    - Science breakthroughs
    - Stories appearing across multiple sources (higher credibility)
-   - Global south perspectives: stories from Africa, Latin America, South/Southeast Asia that offer a different lens on world events
+   - MUST INCLUDE: At least 1 story each from Africa, Latin America, Central Asia, and South/Southeast Asia — prioritize stories told from local perspectives, not just Western coverage of those regions
 
 6. Deprioritize:
    - Celebrity gossip, entertainment unless truly major
@@ -91,6 +91,12 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 ---
 
 [For each category with news: 🤖 Technology and AI, 🌍 Climate and Environment, 🏛️ Global Politics, 🔬 Science and Research, 💼 Business and Economy, 🏥 Health and Medicine — use h3 headers for each category]
+
+---
+
+## 🌏 Global South & Regional Roundup
+
+[ALWAYS include this section. Pick 1 notable story from each of these regions: Africa, Latin America, Central Asia, and South/Southeast Asia. These should be stories told from local perspectives — not just Western coverage of those regions. If a region has no stories, note that briefly. Use sub-headers for each region.]
 
 ---
 

@@ -44,10 +44,18 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   // Africa
   { name: 'Daily Maverick', url: 'https://www.dailymaverick.co.za/dmrss/', category: 'global' },
   { name: 'The East African', url: 'https://www.theeastafrican.co.ke/tea/rss', category: 'global' },
+  { name: 'AllAfrica', url: 'https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf', category: 'global' },
+  { name: 'News24 Africa', url: 'https://feeds.news24.com/articles/news24/Africa/rss', category: 'global' },
 
   // Latin America
   { name: 'Buenos Aires Times', url: 'https://www.batimes.com.ar/feed', category: 'global' },
   { name: 'MercoPress', url: 'https://en.mercopress.com/rss', category: 'global' },
+  { name: 'Brazil Wire', url: 'https://www.brasilwire.com/feed/', category: 'global' },
+  { name: 'Tico Times', url: 'https://ticotimes.net/feed', category: 'global' },
+
+  // Central Asia
+  { name: 'The Diplomat', url: 'https://thediplomat.com/feed/', category: 'global' },
+  { name: 'Eurasianet', url: 'https://eurasianet.org/feed', category: 'global' },
 
   // Europe / EU
   { name: 'Politico EU', url: 'https://www.politico.eu/feed/', category: 'politics' },
