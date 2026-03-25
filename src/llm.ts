@@ -55,5 +55,5 @@ export async function callHaiku(env: Env, prompt: string): Promise<string> {
 }
 
 export async function callSonnet(env: Env, prompt: string): Promise<string> {
-  return callClaude(env, 'claude-sonnet-4-6', prompt, 12000);
+  return callClaude(env, 'claude-sonnet-4-6', prompt, 8000);
 }
