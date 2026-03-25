@@ -59,9 +59,12 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Rzeczpospolita', url: 'https://www.rp.pl/rss_main', category: 'poland' },
   { name: 'Notes From Poland', url: 'https://notesfrompoland.com/feed/', category: 'poland' },
 
-  // Nepal
+  // Nepal (multiple sources for redundancy)
   { name: 'Kathmandu Post', url: 'https://kathmandupost.com/rss', category: 'nepal' },
   { name: 'Republica', url: 'https://myrepublica.nagariknetwork.com/rss', category: 'nepal' },
+  { name: 'OnlineKhabar', url: 'https://english.onlinekhabar.com/feed', category: 'nepal' },
+  { name: 'Nepali Times', url: 'https://www.nepalitimes.com/feed/', category: 'nepal' },
+  { name: 'eKantipur', url: 'https://ekantipur.com/rss', category: 'nepal' },
 
   // Cyprus
   { name: 'Cyprus Mail', url: 'https://cyprus-mail.com/feed/', category: 'cyprus' },

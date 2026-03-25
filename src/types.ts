@@ -92,3 +92,10 @@ export interface PipelineResult {
   triagedStories: TriagedStory[];
   digest: string;
 }
+
+export interface FeedStatus {
+  name: string;
+  ok: boolean;
+  itemCount: number;
+  error?: string;
+}

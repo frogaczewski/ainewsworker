@@ -4,7 +4,7 @@ import { fetchMarketData } from './markets';
 import { callHaiku, callSonnet } from './llm';
 import { buildTriagePrompt, buildCompilationPrompt } from './prompts';
 import { sendDigestEmail, sendErrorEmail } from './email';
-import type { Env, TriagedStory } from './types';
+import type { Env, TriagedStory, FeedStatus } from './types';
 
 async function runPipeline(env: Env): Promise<string> {
   console.log('[Pipeline] Starting daily news digest...');
@@ -108,10 +108,10 @@ async function runPipeline(env: Env): Promise<string> {
   // Step 6: Send email
   console.log('[Pipeline] Step 6: Sending email...');
   try {
-    await sendDigestEmail(env, digest);
+    await sendDigestEmail(env, digest, feedResult.feedStatuses);
   } catch (err) {
     console.log('[Pipeline] Email failed, retrying once...');
-    await sendDigestEmail(env, digest);
+    await sendDigestEmail(env, digest, feedResult.feedStatuses);
   }
 
   console.log('[Pipeline] Daily digest sent successfully!');

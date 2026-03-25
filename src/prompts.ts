@@ -43,7 +43,7 @@ Below are headlines and summaries from ~35 news sources published in the last 24
    - Local crime stories with no broader significance
    - Sports unless a major international event
 
-Polish-language items: translate the headline and summary to English in your output.
+Polish-language and Nepali-language items: translate the headline and summary to English in your output.
 
 Return ONLY a JSON array of selected stories. No commentary.
 
@@ -85,15 +85,11 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 
 ---
 
-## 🌍 Countries of Interest
-
-[For each country that has news (PL, CY, NP, CN, DE, FR, IT, ES, GB, US, EU), create a section with flag emoji + country name. Include as many or as few stories per country as the news warrants. Skip countries with no significant news today.]
+[For each country that has news (PL, CY, NP, CN, DE, FR, IT, ES, GB, US, EU), create a section with flag emoji + country name as an h3 header. Include as many or as few stories per country as the news warrants. Skip countries with no significant news today. IMPORTANT: Cap the US section to 5-6 of the most important stories — do not include every US story.]
 
 ---
 
-## 📚 Categories
-
-[For each category with news: 🤖 Technology and AI, 🌍 Climate and Environment, 🏛️ Global Politics, 🔬 Science and Research, 💼 Business and Economy, 🏥 Health and Medicine]
+[For each category with news: 🤖 Technology and AI, 🌍 Climate and Environment, 🏛️ Global Politics, 🔬 Science and Research, 💼 Business and Economy, 🏥 Health and Medicine — use h3 headers for each category]
 
 ---
 
@@ -130,11 +126,6 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 [WEATHER_DATA_HERE]
 
 ---
-
-## 💡 Suggested Additional Sources
-[2-3 sources that had good coverage today but aren't in the regular feed list]
-
----
 *Generated automatically by AI News Digest*
 
 ## GUIDELINES
@@ -145,6 +136,7 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 - When stories are flagged as "conflicting", describe how different sources reported it differently (e.g., Western vs non-Western framing, political bias differences, global south vs developed world perspectives)
 - Focus on what matters to someone in Cyprus with ties to Poland
 - Use flag emojis for country headers
+- Cap the United States section to 5-6 stories maximum — pick only the most significant
 - Stories about the same event should be consolidated, not repeated across sections
 - Include soccer/football, space, photography news only when truly significant
 - The digest should be informative enough to replace reading the news entirely

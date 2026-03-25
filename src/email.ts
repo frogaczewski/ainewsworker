@@ -1,5 +1,5 @@
 import { EMAIL_FROM, EMAIL_TO } from './config';
-import type { Env } from './types';
+import type { Env, FeedStatus } from './types';
 
 function markdownToHtml(md: string): string {
   // Handle blockquotes before HTML escaping
@@ -56,27 +56,56 @@ function markdownToHtml(md: string): string {
   return html;
 }
 
-function wrapInEmailTemplate(body: string): string {
-  return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;line-height:1.6;color:#1a1a1a;max-width:720px;margin:0 auto;padding:20px;background:#f9f9f9}
-h1{color:#1a1a1a;border-bottom:3px solid #2563eb;padding-bottom:12px;font-size:24px}
-h2{color:#2563eb;margin-top:32px;font-size:20px}
-h3{color:#374151;margin-top:24px;font-size:17px}
-p{margin:8px 0}strong{color:#111}em{color:#6b7280}
-hr{border:none;border-top:1px solid #e5e7eb;margin:24px 0}
-table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14px}
-th,thead tr th{background:#2563eb;color:white;padding:10px 14px;text-align:left;font-weight:600}
-td{padding:8px 14px;border-bottom:1px solid #e5e7eb}
-tr:nth-child(even){background:#f3f4f6}
-ul{padding-left:20px}li{margin:4px 0}a{color:#2563eb}
-blockquote{border-left:4px solid #2563eb;margin:12px 0;padding:8px 16px;background:#f0f4ff;color:#374151}
-</style></head><body>${body}</body></html>`;
+function buildFeedStatusFooter(feedStatuses?: FeedStatus[]): string {
+  if (!feedStatuses || feedStatuses.length === 0) return '';
+
+  const ok = feedStatuses.filter(f => f.ok);
+  const failed = feedStatuses.filter(f => !f.ok);
+
+  let html = `<details style="margin-top:32px;padding:16px;background:#F0EBE3;border-radius:6px;font-size:13px;color:#5C4A3A">
+<summary style="cursor:pointer;font-weight:600;color:#3D3029">Source Status: ${ok.length} active, ${failed.length} failed</summary>
+<div style="margin-top:12px">`;
+
+  if (failed.length > 0) {
+    html += `<p style="margin:8px 0;font-weight:600;color:#9B4D3A">Failed sources:</p><ul style="padding-left:18px;margin:4px 0">`;
+    for (const f of failed) {
+      const reason = f.error?.replace(/^[^:]+:\s*/, '') || 'unknown error';
+      html += `<li>${f.name} — ${reason}</li>`;
+    }
+    html += `</ul>`;
+  }
+
+  html += `<p style="margin:8px 0;font-weight:600;color:#5C4A3A">Active sources (${ok.length}):</p><ul style="padding-left:18px;margin:4px 0">`;
+  for (const f of ok) {
+    html += `<li>${f.name} (${f.itemCount} items)</li>`;
+  }
+  html += `</ul></div></details>`;
+
+  return html;
 }
 
-export async function sendDigestEmail(env: Env, markdown: string): Promise<void> {
+function wrapInEmailTemplate(body: string, feedStatusHtml: string): string {
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>
+body{font-family:Garamond,'EB Garamond','Times New Roman',Georgia,serif;line-height:1.7;color:#2D2A26;max-width:720px;margin:0 auto;padding:20px;background:#F7F3EE}
+h1{color:#2D2A26;border-bottom:3px solid #D4835E;padding-bottom:12px;font-size:26px;font-weight:700}
+h2{color:#9B4D3A;margin-top:32px;font-size:21px}
+h3{color:#5C4A3A;margin-top:24px;font-size:18px}
+p{margin:8px 0}strong{color:#2D2A26}em{color:#8B7B6B}
+hr{border:none;border-top:1px solid #DDD5CA;margin:24px 0}
+table{border-collapse:collapse;width:100%;margin:16px 0;font-size:15px}
+th,thead tr th{background:#D4835E;color:#FAF6F0;padding:10px 14px;text-align:left;font-weight:600}
+td{padding:8px 14px;border-bottom:1px solid #DDD5CA}
+tr:nth-child(even){background:#F0EBE3}
+ul{padding-left:20px}li{margin:4px 0}a{color:#9B4D3A;text-decoration:underline}
+blockquote{border-left:4px solid #D4835E;margin:12px 0;padding:8px 16px;background:#FAF5EF;color:#5C4A3A}
+</style></head><body>${body}${feedStatusHtml}</body></html>`;
+}
+
+export async function sendDigestEmail(env: Env, markdown: string, feedStatuses?: FeedStatus[]): Promise<void> {
   const htmlBody = markdownToHtml(markdown);
-  const htmlFull = wrapInEmailTemplate(htmlBody);
+  const feedStatusHtml = buildFeedStatusFooter(feedStatuses);
+  const htmlFull = wrapInEmailTemplate(htmlBody, feedStatusHtml);
 
   const today = new Date();
   const subject = `Daily News Digest — ${today.toLocaleDateString('en-GB', {

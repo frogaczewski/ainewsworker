@@ -1,12 +1,13 @@
 import { RSS_FEEDS } from './config';
 import { parseRssFeed } from './rss-parser';
-import type { RssItem } from './types';
+import type { RssItem, FeedStatus } from './types';
 
 interface FeedResult {
   items: RssItem[];
   failed: number;
   total: number;
   errors: string[];
+  feedStatuses: FeedStatus[];
 }
 
 async function fetchSingleFeed(feed: { name: string; url: string; editorial?: boolean }): Promise<{ items: RssItem[]; error?: string }> {
@@ -72,13 +73,19 @@ export async function fetchAllFeeds(): Promise<FeedResult> {
 
   const allItems: RssItem[] = [];
   const errors: string[] = [];
+  const feedStatuses: FeedStatus[] = [];
   let failed = 0;
 
-  for (const result of results) {
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const feedName = RSS_FEEDS[i].name;
     allItems.push(...result.items);
     if (result.error) {
       errors.push(result.error);
       failed++;
+      feedStatuses.push({ name: feedName, ok: false, itemCount: 0, error: result.error });
+    } else {
+      feedStatuses.push({ name: feedName, ok: true, itemCount: result.items.length });
     }
   }
 
@@ -89,5 +96,6 @@ export async function fetchAllFeeds(): Promise<FeedResult> {
     failed,
     total: RSS_FEEDS.length,
     errors,
+    feedStatuses,
   };
 }
