@@ -9,7 +9,7 @@ export function buildTriagePrompt(items: RssItem[]): string {
 
 Below are headlines and summaries from ~35 news sources published in the last 24 hours. Your job:
 
-1. Select the 40-60 most important/interesting stories (NO MORE than 60)
+1. Select the 50-80 most important/interesting stories
 2. For each selected story, output a JSON object:
    {
      "headline": "original headline",
