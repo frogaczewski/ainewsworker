@@ -101,20 +101,32 @@ export async function sendDigestEmail(env: Env, markdown: string): Promise<void>
     body: JSON.stringify(payload),
   });
 
-  const responseData = await response.json() as {
-    Messages?: Array<{
-      Status?: string;
-      To?: Array<{ Email?: string; MessageID?: number }>;
-      Errors?: Array<{ ErrorMessage?: string }>;
-    }>;
-  };
+  const responseText = await response.text();
+  console.log(`[Email] Mailjet HTTP ${response.status} response: ${responseText}`);
 
   if (!response.ok) {
-    throw new Error(`Mailjet error (${response.status}): ${JSON.stringify(responseData)}`);
+    throw new Error(`Mailjet error (${response.status}): ${responseText}`);
+  }
+
+  let responseData: {
+    Messages?: Array<{
+      Status?: string;
+      To?: Array<{ Email?: string; MessageID?: number; MessageUUID?: string }>;
+      Errors?: Array<{ ErrorMessage?: string; ErrorCode?: string }>;
+    }>;
+  };
+  try {
+    responseData = JSON.parse(responseText);
+  } catch {
+    throw new Error(`Mailjet returned non-JSON: ${responseText}`);
   }
 
   const msg = responseData.Messages?.[0];
-  console.log(`[Email] Mailjet status: ${msg?.Status}, MessageID: ${msg?.To?.[0]?.MessageID}`);
+  console.log(`[Email] Mailjet status: ${msg?.Status}, MessageID: ${msg?.To?.[0]?.MessageID}, MessageUUID: ${msg?.To?.[0]?.MessageUUID}`);
+
+  if (msg?.Errors && msg.Errors.length > 0) {
+    console.error(`[Email] Mailjet errors: ${JSON.stringify(msg.Errors)}`);
+  }
 
   if (msg?.Status === 'error') {
     throw new Error(`Mailjet delivery error: ${JSON.stringify(msg.Errors)}`);
