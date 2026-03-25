@@ -16,7 +16,7 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'The Guardian World', url: 'https://www.theguardian.com/world/rss', category: 'global' },
   { name: 'The Guardian Science', url: 'https://www.theguardian.com/science/rss', category: 'science' },
   { name: 'NPR News', url: 'https://feeds.npr.org/1002/rss.xml', category: 'global' },
-  { name: 'ProPublica', url: 'https://feeds.propublica.org/propublica/main', category: 'global' },
+  { name: 'ProPublica', url: 'https://feeds.propublica.org/propublica/main', category: 'global', editorial: true },
   { name: 'Democracy Now', url: 'https://www.democracynow.org/democracynow.rss', category: 'global' },
 
   // Middle East
@@ -75,6 +75,17 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   // Science
   { name: 'Science Daily', url: 'https://www.sciencedaily.com/rss/all.xml', category: 'science' },
   { name: 'Nature News', url: 'https://www.nature.com/nature.rss', category: 'science' },
+
+  // Editorial / Investigative / Open-Source (non-paywalled)
+  { name: 'Bellingcat', url: 'https://www.bellingcat.com/feed/', category: 'editorial', editorial: true },
+  { name: 'The Conversation', url: 'https://theconversation.com/articles.atom', category: 'editorial', editorial: true },
+  { name: 'The Intercept', url: 'https://theintercept.com/feed/?rss', category: 'editorial', editorial: true },
+  { name: 'Global Voices', url: 'https://globalvoices.org/feed/', category: 'editorial', editorial: true },
+  { name: 'Carbon Brief', url: 'https://www.carbonbrief.org/feed', category: 'editorial', editorial: true },
+  { name: 'The Markup', url: 'https://themarkup.org/feeds/rss.xml', category: 'editorial', editorial: true },
+  { name: 'OCCRP', url: 'https://www.occrp.org/en/rss', category: 'editorial', editorial: true },
+  { name: 'IPS News', url: 'https://www.ipsnews.net/feed/', category: 'editorial', editorial: true },
+  { name: 'Mongabay', url: 'https://news.mongabay.com/feed/', category: 'editorial', editorial: true },
 ];
 
 export const WEATHER_LOCATIONS: WeatherLocation[] = [

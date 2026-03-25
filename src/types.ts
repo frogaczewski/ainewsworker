@@ -9,6 +9,7 @@ export interface RssFeedConfig {
   name: string;
   url: string;
   category: string;
+  editorial?: boolean;
 }
 
 export interface RssItem {
@@ -17,6 +18,7 @@ export interface RssItem {
   link: string;
   pubDate: string;
   source: string;
+  editorial?: boolean;
 }
 
 export interface TriagedStory {
@@ -30,6 +32,7 @@ export interface TriagedStory {
   duplicate_of: number | null;
   conflicting?: boolean;
   conflict_note?: string;
+  editorial?: boolean;
 }
 
 export interface WeatherLocation {

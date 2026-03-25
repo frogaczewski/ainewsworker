@@ -9,7 +9,7 @@ interface FeedResult {
   errors: string[];
 }
 
-async function fetchSingleFeed(feed: { name: string; url: string }): Promise<{ items: RssItem[]; error?: string }> {
+async function fetchSingleFeed(feed: { name: string; url: string; editorial?: boolean }): Promise<{ items: RssItem[]; error?: string }> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout per feed
@@ -31,6 +31,11 @@ async function fetchSingleFeed(feed: { name: string; url: string }): Promise<{ i
 
     const xml = await response.text();
     const items = parseRssFeed(xml, feed.name);
+    if (feed.editorial) {
+      for (const item of items) {
+        item.editorial = true;
+      }
+    }
     return { items };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

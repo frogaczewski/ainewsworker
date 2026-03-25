@@ -2,7 +2,7 @@ import type { RssItem, TriagedStory, WeatherData, MarketData } from './types';
 
 export function buildTriagePrompt(items: RssItem[]): string {
   const itemsText = items.map((item, i) =>
-    `[${i}] SOURCE: ${item.source}\nTITLE: ${item.title}\nSUMMARY: ${item.summary}\nLINK: ${item.link}\nDATE: ${item.pubDate}`
+    `[${i}] SOURCE: ${item.source}${item.editorial ? ' [EDITORIAL]' : ''}\nTITLE: ${item.title}\nSUMMARY: ${item.summary}\nLINK: ${item.link}\nDATE: ${item.pubDate}`
   ).join('\n\n');
 
   return `You are a news editor for a daily digest. Your reader lives in Cyprus with ties to Poland and interests in technology, climate, science, health, and global politics.
@@ -21,7 +21,8 @@ Below are headlines and summaries from ~35 news sources published in the last 24
      "importance": "high" | "medium",
      "duplicate_of": null or index of earlier story covering same event,
      "conflicting": false,
-     "conflict_note": null
+     "conflict_note": null,
+     "editorial": true if the source is marked [EDITORIAL], false otherwise
    }
 
 3. IMPORTANT: When the same event appears in multiple sources, mark duplicates and note which sources covered it. This is crucial for cross-referencing.
@@ -102,6 +103,12 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 
 ---
 
+## 📰 Editorial Deep Dives
+
+[Select 2-3 of the best editorial/investigative articles from sources marked "editorial": true. These are from non-paywalled, independent, and open-source journalism outlets (Bellingcat, The Conversation, The Intercept, Global Voices, Carbon Brief, The Markup, OCCRP, IPS News, Mongabay, ProPublica). For each, write a thorough 10-12 sentence summary that captures the full argument, key evidence, and conclusions — the reader should feel they've read the article. Include the source link.]
+
+---
+
 ## 📈 Markets & Currencies
 
 | Index / Asset | Value | Change |
@@ -141,6 +148,7 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 - Stories about the same event should be consolidated, not repeated across sections
 - Include soccer/football, space, photography news only when truly significant
 - The digest should be informative enough to replace reading the news entirely
+- For the "Editorial Deep Dives" section: pick the 2-3 most compelling editorial/investigative pieces (marked editorial: true). Summarize each in 10-12 sentences — capture the full thesis, key evidence, notable quotes, and conclusions. The reader should feel they've read the original.
 - Do NOT use markdown blockquote syntax (lines starting with >) — it does not render in email
 
 === TRIAGED STORIES ===

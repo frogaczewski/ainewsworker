@@ -75,6 +75,7 @@ async function runPipeline(env: Env): Promise<string> {
         category_tags: [],
         importance: 'medium' as const,
         duplicate_of: null,
+        editorial: item.editorial,
       }));
     }
   }
