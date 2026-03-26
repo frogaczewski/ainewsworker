@@ -1,4 +1,4 @@
-import { EMAIL_FROM, EMAIL_TO } from './config';
+import { EMAIL_FROM, EMAIL_TO, EMAIL_TO_PL } from './config';
 import type { Env, FeedStatus } from './types';
 
 function markdownToHtml(md: string): string {
@@ -102,23 +102,31 @@ blockquote{border-left:4px solid #D4835E;margin:12px 0;padding:8px 16px;backgrou
 </style></head><body>${body}${feedStatusHtml}</body></html>`;
 }
 
-export async function sendDigestEmail(env: Env, markdown: string, feedStatuses?: FeedStatus[]): Promise<void> {
+export async function sendDigestEmail(
+  env: Env,
+  markdown: string,
+  feedStatuses?: FeedStatus[],
+  recipient?: { email: string; name: string },
+  subjectOverride?: string,
+): Promise<void> {
   const htmlBody = markdownToHtml(markdown);
   const feedStatusHtml = buildFeedStatusFooter(feedStatuses);
   const htmlFull = wrapInEmailTemplate(htmlBody, feedStatusHtml);
 
   const today = new Date();
-  const subject = `Daily News Digest — ${today.toLocaleDateString('en-GB', {
+  const subject = subjectOverride ?? `Daily News Digest — ${today.toLocaleDateString('en-GB', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
     year: 'numeric',
   })}`;
 
+  const to = recipient ?? EMAIL_TO;
+
   const payload = {
     Messages: [{
       From: { Email: EMAIL_FROM.email, Name: EMAIL_FROM.name },
-      To: [{ Email: EMAIL_TO.email, Name: EMAIL_TO.name }],
+      To: [{ Email: to.email, Name: to.name }],
       Subject: subject,
       HTMLPart: htmlFull,
       TextPart: markdown,

@@ -159,3 +159,23 @@ ${weatherJson}
 === MARKET DATA ===
 ${marketsJson}`;
 }
+
+export function buildTranslationPrompt(digest: string): string {
+  return `Przetłumacz poniższy biuletyn informacyjny z angielskiego na polski. Wymagania:
+
+1. Zachowaj poprawną polską gramatykę, ortografię i interpunkcję — pisz jak doświadczony polski dziennikarz
+2. Używaj właściwych przypadków gramatycznych, odmian czasowników i szyku zdań naturalnego dla języka polskiego
+3. Zachowaj cały format markdown bez zmian: nagłówki (#, ##, ###), tabele, listy, linki, pogrubienia, kursywę, linie poziome (---)
+4. NIE tłumacz nazw źródeł w linkach — zachowaj oryginalne nazwy mediów (np. "The Guardian", "France 24")
+5. NIE tłumacz nazw indeksów giełdowych, walut ani symboli w tabelach
+6. Przetłumacz nazwy krajów, kategorii i sekcji na polski
+7. Emoji zachowaj bez zmian
+8. Nazwy własne (osoby, organizacje, miejsca) zachowaj w oryginalnej pisowni, chyba że istnieje powszechnie używana polska forma (np. "Stany Zjednoczone", "Wielka Brytania", "Cypr")
+9. Zmień "Daily News Digest" na "Codzienny Przegląd Wiadomości" w nagłówku
+10. Zmień stopkę na: *Wygenerowano automatycznie przez AI News Digest*
+
+Zwróć TYLKO przetłumaczony markdown, bez komentarzy.
+
+=== ENGLISH DIGEST ===
+${digest}`;
+}

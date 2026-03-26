@@ -2,8 +2,9 @@ import { fetchAllFeeds } from './feeds';
 import { fetchWeather } from './weather';
 import { fetchMarketData } from './markets';
 import { callHaiku, callSonnet } from './llm';
-import { buildTriagePrompt, buildCompilationPrompt } from './prompts';
+import { buildTriagePrompt, buildCompilationPrompt, buildTranslationPrompt } from './prompts';
 import { sendDigestEmail, sendErrorEmail } from './email';
+import { EMAIL_TO_PL } from './config';
 import type { Env, TriagedStory, FeedStatus } from './types';
 
 async function runPipeline(env: Env): Promise<string> {
@@ -105,14 +106,55 @@ async function runPipeline(env: Env): Promise<string> {
 
   console.log(`[Pipeline] Digest compiled (${digest.length} characters)`);
 
-  // Step 6: Send email
-  console.log('[Pipeline] Step 6: Sending email...');
+  // Step 6: Translate to Polish with Sonnet
+  console.log('[Pipeline] Step 6: Translating digest to Polish with Sonnet...');
+  let polishDigest: string;
+
   try {
-    await sendDigestEmail(env, digest, feedResult.feedStatuses);
+    const translationPrompt = buildTranslationPrompt(digest);
+    polishDigest = await callSonnet(env, translationPrompt);
   } catch (err) {
-    console.log('[Pipeline] Email failed, retrying once...');
-    await sendDigestEmail(env, digest, feedResult.feedStatuses);
+    console.log('[Pipeline] Polish translation failed, retrying once...');
+    try {
+      const translationPrompt = buildTranslationPrompt(digest);
+      polishDigest = await callSonnet(env, translationPrompt);
+    } catch (retryErr) {
+      const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+      console.log(`[Pipeline] Polish translation retry also failed: ${retryMsg}`);
+      polishDigest = ''; // Skip Polish email if translation fails
+    }
   }
+
+  console.log(`[Pipeline] Polish translation: ${polishDigest.length} characters`);
+
+  // Step 7: Send emails (English + Polish in parallel)
+  console.log('[Pipeline] Step 7: Sending emails...');
+
+  const today = new Date();
+  const plDateStr = today.toLocaleDateString('pl-PL', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const emailTasks: Promise<void>[] = [
+    sendDigestEmail(env, digest, feedResult.feedStatuses).catch(async () => {
+      console.log('[Pipeline] English email failed, retrying once...');
+      await sendDigestEmail(env, digest, feedResult.feedStatuses);
+    }),
+  ];
+
+  if (polishDigest) {
+    emailTasks.push(
+      sendDigestEmail(env, polishDigest, feedResult.feedStatuses, EMAIL_TO_PL, `Codzienny Przegląd Wiadomości — ${plDateStr}`).catch(async () => {
+        console.log('[Pipeline] Polish email failed, retrying once...');
+        await sendDigestEmail(env, polishDigest, feedResult.feedStatuses, EMAIL_TO_PL, `Codzienny Przegląd Wiadomości — ${plDateStr}`);
+      }),
+    );
+  }
+
+  await Promise.all(emailTasks);
 
   console.log('[Pipeline] Daily digest sent successfully!');
   return 'success';

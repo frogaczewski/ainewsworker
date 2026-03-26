@@ -123,6 +123,7 @@ export const CATEGORIES = ['tech_ai', 'climate', 'politics', 'science', 'busines
 
 export const EMAIL_FROM = { email: 'ainews@rogaczewski.me', name: 'AI News Digest' };
 export const EMAIL_TO = { email: 'frogaczewski@gmail.com', name: 'Filip Rogaczewski' };
+export const EMAIL_TO_PL = { email: 'jarrog@gmail.com', name: 'Jarosław Rogaczewski' };
 
 export const WMO_WEATHER_CODES: Record<number, string> = {
   0: 'Clear sky',
