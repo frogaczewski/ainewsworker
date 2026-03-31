@@ -8,7 +8,11 @@ import { EMAIL_TO_PL } from './config';
 import { buildLandingPage } from './landing';
 import type { Env, TriagedStory, FeedStatus, DigestData } from './types';
 
-async function runPipeline(env: Env): Promise<string> {
+interface PipelineOptions {
+  dryRun?: boolean; // skip compilation, translation, and emails — just populate KV
+}
+
+async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string> {
   console.log('[Pipeline] Starting daily news digest...');
 
   // Step 1-3: Fetch RSS, weather, and market data in parallel
@@ -108,6 +112,12 @@ async function runPipeline(env: Env): Promise<string> {
     console.log(`[Pipeline] Saved ${triagedStories.length} stories to KV (${json.length} bytes), index: ${dateIndex.length} dates`);
   } catch (err) {
     console.error(`[Pipeline] KV save failed (non-fatal): ${err}`);
+  }
+
+  // Dry run: stop after KV population, skip compilation + emails
+  if (opts.dryRun) {
+    console.log('[Pipeline] Dry run complete — KV populated, skipping compilation and emails');
+    return 'dry-run-success';
   }
 
   // Step 5: Sonnet compilation
@@ -273,8 +283,9 @@ export default {
 
       // Run synchronously — the response keeps the connection open, giving us
       // the full wall-clock allowance. Streaming LLM calls keep it alive.
+      const dryRun = url.searchParams.get('dry') === 'true';
       try {
-        const result = await runPipeline(env);
+        const result = await runPipeline(env, { dryRun });
         return new Response(JSON.stringify({ status: 'success', result }), {
           headers: { 'Content-Type': 'application/json' },
         });
