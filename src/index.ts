@@ -5,6 +5,7 @@ import { callHaiku, callSonnet } from './llm';
 import { buildTriagePrompt, buildCompilationPrompt, buildTranslationPrompt } from './prompts';
 import { sendDigestEmail, sendErrorEmail } from './email';
 import { EMAIL_TO_PL } from './config';
+import { buildLandingPage } from './landing';
 import type { Env, TriagedStory, FeedStatus } from './types';
 
 async function runPipeline(env: Env): Promise<string> {
@@ -281,6 +282,13 @@ export default {
       }
     }
 
-    return new Response('AI News Digest Worker. POST /run to trigger manually, POST /test-email to test email.', { status: 200 });
+    // Landing page
+    if (url.pathname === '/' && request.method === 'GET') {
+      return new Response(buildLandingPage(), {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      });
+    }
+
+    return new Response('Not found', { status: 404 });
   },
 };
