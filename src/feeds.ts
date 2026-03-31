@@ -11,37 +11,57 @@ interface FeedResult {
 }
 
 async function fetchSingleFeed(feed: { name: string; url: string; editorial?: boolean }): Promise<{ items: RssItem[]; error?: string }> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout per feed
+  const userAgents = [
+    'DailyNewsDigest/2.0 (Cloudflare Worker)',
+    'Mozilla/5.0 (compatible; NewsBot/2.0; +https://ainews.rogaczewski.me)',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)',
+  ];
 
-    const response = await fetch(feed.url, {
-      headers: {
-        'User-Agent': 'DailyNewsDigest/2.0 (Cloudflare Worker)',
-        'Accept': 'application/rss+xml, application/xml, text/xml, application/atom+xml, */*',
-      },
-      signal: controller.signal,
-      redirect: 'follow',
-    });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    clearTimeout(timeoutId);
+      const response = await fetch(feed.url, {
+        headers: {
+          'User-Agent': userAgents[attempt] || userAgents[0],
+          'Accept': 'application/rss+xml, application/xml, text/xml, application/atom+xml, */*',
+        },
+        signal: controller.signal,
+        redirect: 'follow',
+      });
 
-    if (!response.ok) {
-      return { items: [], error: `${feed.name}: HTTP ${response.status}` };
-    }
+      clearTimeout(timeoutId);
 
-    const xml = await response.text();
-    const items = parseRssFeed(xml, feed.name);
-    if (feed.editorial) {
-      for (const item of items) {
-        item.editorial = true;
+      if (response.status === 403 && attempt < 2) {
+        // Bot detection — retry with different User-Agent after brief delay
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        continue;
       }
+
+      if (!response.ok) {
+        return { items: [], error: `${feed.name}: HTTP ${response.status}` };
+      }
+
+      const xml = await response.text();
+      const items = parseRssFeed(xml, feed.name);
+      if (feed.editorial) {
+        for (const item of items) {
+          item.editorial = true;
+        }
+      }
+      return { items };
+    } catch (err) {
+      if (attempt < 2 && err instanceof Error && err.name === 'AbortError') {
+        // Timeout — retry once
+        continue;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      return { items: [], error: `${feed.name}: ${message}` };
     }
-    return { items };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { items: [], error: `${feed.name}: ${message}` };
   }
+
+  return { items: [], error: `${feed.name}: failed after 3 attempts` };
 }
 
 // Fetch feeds in batches to manage subrequest budget
