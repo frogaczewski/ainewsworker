@@ -94,10 +94,18 @@ async function runPipeline(env: Env): Promise<string> {
     };
     const json = JSON.stringify(digestData);
     await Promise.all([
-      env.DIGEST_KV.put('digest:latest', json, { expirationTtl: 259200 }),
-      env.DIGEST_KV.put(`digest:${today}`, json, { expirationTtl: 259200 }),
+      env.DIGEST_KV.put('digest:latest', json),
+      env.DIGEST_KV.put(`digest:${today}`, json),
     ]);
-    console.log(`[Pipeline] Saved ${triagedStories.length} stories to KV (${json.length} bytes)`);
+
+    // Maintain a date index for archive/pagination
+    const indexRaw = await env.DIGEST_KV.get('articles:index');
+    const dateIndex: string[] = indexRaw ? JSON.parse(indexRaw) : [];
+    if (!dateIndex.includes(today)) dateIndex.unshift(today);
+    if (dateIndex.length > 90) dateIndex.length = 90; // keep ~3 months
+    await env.DIGEST_KV.put('articles:index', JSON.stringify(dateIndex));
+
+    console.log(`[Pipeline] Saved ${triagedStories.length} stories to KV (${json.length} bytes), index: ${dateIndex.length} dates`);
   } catch (err) {
     console.error(`[Pipeline] KV save failed (non-fatal): ${err}`);
   }
