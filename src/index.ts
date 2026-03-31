@@ -86,36 +86,24 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     }
   }
 
-  // Save triaged stories + weather + markets to KV for the landing page
-  try {
-    const today = new Date().toISOString().slice(0, 10);
-    const digestData: DigestData = {
-      date: today,
-      stories: triagedStories,
-      weather,
-      markets,
-      feedStats: { total: feedResult.total, succeeded: feedResult.total - feedResult.failed },
-    };
-    const json = JSON.stringify(digestData);
-    await Promise.all([
-      env.DIGEST_KV.put('digest:latest', json),
-      env.DIGEST_KV.put(`digest:${today}`, json),
-    ]);
-
-    // Maintain a date index for archive/pagination
-    const indexRaw = await env.DIGEST_KV.get('articles:index');
-    const dateIndex: string[] = indexRaw ? JSON.parse(indexRaw) : [];
-    if (!dateIndex.includes(today)) dateIndex.unshift(today);
-    if (dateIndex.length > 90) dateIndex.length = 90; // keep ~3 months
-    await env.DIGEST_KV.put('articles:index', JSON.stringify(dateIndex));
-
-    console.log(`[Pipeline] Saved ${triagedStories.length} stories to KV (${json.length} bytes), index: ${dateIndex.length} dates`);
-  } catch (err) {
-    console.error(`[Pipeline] KV save failed (non-fatal): ${err}`);
-  }
-
-  // Dry run: stop after KV population, skip compilation + emails
+  // Dry run: save triaged stories to KV without compilation, then stop
   if (opts.dryRun) {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const digestData: DigestData = {
+        date: today,
+        stories: triagedStories,
+        weather,
+        markets,
+        feedStats: { total: feedResult.total, succeeded: feedResult.total - feedResult.failed },
+      };
+      const json = JSON.stringify(digestData);
+      await env.DIGEST_KV.put('digest:latest', json);
+      await env.DIGEST_KV.put(`digest:${today}`, json);
+      console.log(`[Pipeline] Dry run: saved ${triagedStories.length} stories to KV (${json.length} bytes)`);
+    } catch (err) {
+      console.error(`[Pipeline] KV save failed: ${err}`);
+    }
     console.log('[Pipeline] Dry run complete — KV populated, skipping compilation and emails');
     return 'dry-run-success';
   }
@@ -144,6 +132,35 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   }
 
   console.log(`[Pipeline] Digest compiled (${digest.length} characters)`);
+
+  // Save everything to KV — including the compiled Sonnet digest
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const digestData: DigestData = {
+      date: today,
+      stories: triagedStories,
+      weather,
+      markets,
+      feedStats: { total: feedResult.total, succeeded: feedResult.total - feedResult.failed },
+      digestMarkdown: digest,
+    };
+    const json = JSON.stringify(digestData);
+    await Promise.all([
+      env.DIGEST_KV.put('digest:latest', json),
+      env.DIGEST_KV.put(`digest:${today}`, json),
+    ]);
+
+    // Maintain a date index for archive/pagination
+    const indexRaw = await env.DIGEST_KV.get('articles:index');
+    const dateIndex: string[] = indexRaw ? JSON.parse(indexRaw) : [];
+    if (!dateIndex.includes(today)) dateIndex.unshift(today);
+    if (dateIndex.length > 90) dateIndex.length = 90; // keep ~3 months
+    await env.DIGEST_KV.put('articles:index', JSON.stringify(dateIndex));
+
+    console.log(`[Pipeline] Saved digest + ${triagedStories.length} stories to KV (${json.length} bytes), index: ${dateIndex.length} dates`);
+  } catch (err) {
+    console.error(`[Pipeline] KV save failed (non-fatal): ${err}`);
+  }
 
   // Step 6: Translate to Polish with Sonnet
   console.log('[Pipeline] Step 6: Translating digest to Polish with Sonnet...');
