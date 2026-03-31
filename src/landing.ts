@@ -1,124 +1,143 @@
 // Landing page HTML template for AI News Digest
 
-const SAMPLE_ARTICLES = [
-  {
-    category: 'Global Politics',
-    emoji: '🏛',
-    stories: [
-      {
-        headline: 'EU Leaders Reach Historic Agreement on Digital Infrastructure Investment',
-        summary: 'European Union member states have agreed on a landmark €45 billion package aimed at modernising digital infrastructure across the bloc, with a focus on AI research hubs and cross-border connectivity.',
-        source: 'Politico EU',
-        time: '3h ago',
-      },
-      {
-        headline: 'Southeast Asian Nations Form Joint Climate Resilience Task Force',
-        summary: 'ASEAN countries announced a new cooperative framework to address rising sea levels and extreme weather events affecting the region\'s coastal communities.',
-        source: 'Straits Times',
-        time: '5h ago',
-      },
-      {
-        headline: 'G7 Finance Ministers Agree on New Framework for Digital Currency Regulation',
-        summary: 'The group of seven industrialised nations has outlined principles for governing central bank digital currencies, seeking common ground on cross-border payments and consumer protection standards.',
-        source: 'BBC Business',
-        time: '6h ago',
-      },
-    ],
-  },
-  {
-    category: 'Poland',
-    emoji: '🇵🇱',
-    stories: [
-      {
-        headline: 'Gdańsk Port Expansion Project Enters Final Phase',
-        summary: 'The ambitious expansion of the Port of Gdańsk, set to make it one of the largest container terminals in the Baltic, has entered its final construction phase with completion expected by autumn.',
-        source: 'Gazeta Wyborcza',
-        time: '4h ago',
-      },
-      {
-        headline: 'Warsaw Metro Line 3 Receives EU Cohesion Fund Approval',
-        summary: 'The European Commission has approved €1.2 billion in cohesion funding for the third metro line, which will connect the Praga district to the western suburbs by 2031.',
-        source: 'Rzeczpospolita',
-        time: '7h ago',
-      },
-    ],
-  },
-  {
-    category: 'Cyprus',
-    emoji: '🇨🇾',
-    stories: [
-      {
-        headline: 'Cyprus Approves New Renewable Energy Targets for 2030',
-        summary: 'The Cypriot parliament has approved an updated national energy plan targeting 35% renewable energy in the electricity mix by 2030, up from the previous goal of 26%.',
-        source: 'Cyprus Mail',
-        time: '6h ago',
-      },
-    ],
-  },
-  {
-    category: 'Tech & AI',
-    emoji: '🤖',
-    stories: [
-      {
-        headline: 'Open-Source Language Model Achieves Breakthrough in Multilingual Understanding',
-        summary: 'A consortium of European research labs has released a new open-source language model that sets new benchmarks in understanding and generating text across 47 languages.',
-        source: 'TechCrunch',
-        time: '2h ago',
-      },
-      {
-        headline: 'Wearable Health Sensors Now Capable of Real-Time Blood Sugar Monitoring',
-        summary: 'A new generation of non-invasive wearable sensors promises continuous glucose monitoring without finger pricks, potentially transforming diabetes management worldwide.',
-        source: 'Wired',
-        time: '7h ago',
-      },
-    ],
-  },
-  {
-    category: 'Science',
-    emoji: '🔬',
-    stories: [
-      {
-        headline: 'Deep-Sea Expedition Discovers New Species in Pacific Trench',
-        summary: 'Marine biologists have catalogued over 30 previously unknown species during a month-long expedition to the Kermadec Trench, including bioluminescent organisms at depths exceeding 8,000 metres.',
-        source: 'Nature News',
-        time: '8h ago',
-      },
-      {
-        headline: 'CERN Reports Anomalous Results in Latest Particle Collision Data',
-        summary: 'Physicists at the Large Hadron Collider have identified unexpected deviations from the Standard Model in muon decay measurements, prompting calls for independent verification.',
-        source: 'Science Daily',
-        time: '5h ago',
-      },
-    ],
-  },
-  {
-    category: 'Business & Markets',
-    emoji: '💼',
-    stories: [
-      {
-        headline: 'Global Semiconductor Supply Chains Shift Toward Regional Hubs',
-        summary: 'Major chipmakers are accelerating plans to build fabrication plants in Europe and Southeast Asia, reducing dependency on concentrated production centres amid growing geopolitical tensions.',
-        source: 'Nikkei Asia',
-        time: '4h ago',
-      },
-    ],
-  },
-];
+import type { DigestData, TriagedStory, WeatherData, MarketData } from './types';
 
-function renderNewsColumns(): string {
-  const mid = Math.ceil(SAMPLE_ARTICLES.length / 2);
-  const left = SAMPLE_ARTICLES.slice(0, mid);
-  const right = SAMPLE_ARTICLES.slice(mid);
+// ── Display maps ──
 
-  const renderCol = (sections: typeof SAMPLE_ARTICLES) =>
-    sections.map(section => `
+const CATEGORY_DISPLAY: Record<string, { label: string; emoji: string; order: number }> = {
+  politics: { label: 'Global Politics', emoji: '🏛', order: 1 },
+  tech_ai:  { label: 'Tech & AI',      emoji: '🤖', order: 2 },
+  science:  { label: 'Science',         emoji: '🔬', order: 3 },
+  business: { label: 'Business & Markets', emoji: '💼', order: 4 },
+  climate:  { label: 'Climate & Environment', emoji: '🌍', order: 5 },
+  health:   { label: 'Health',          emoji: '🏥', order: 6 },
+};
+
+const COUNTRY_DISPLAY: Record<string, { label: string; emoji: string; order: number }> = {
+  PL: { label: 'Poland',  emoji: '🇵🇱', order: 10 },
+  CY: { label: 'Cyprus',  emoji: '🇨🇾', order: 11 },
+  NP: { label: 'Nepal',   emoji: '🇳🇵', order: 12 },
+};
+
+// ── Helpers ──
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Section grouping ──
+
+interface LandingSection {
+  key: string;
+  label: string;
+  emoji: string;
+  order: number;
+  stories: { headline: string; summary: string; source: string; link: string }[];
+}
+
+function groupStoriesIntoSections(stories: TriagedStory[]): LandingSection[] {
+  const unique = stories.filter(s => s.duplicate_of === null);
+  const sections = new Map<string, LandingSection>();
+
+  for (const story of unique) {
+    // Country-specific sections first
+    let assigned = false;
+    for (const tag of story.country_tags) {
+      const country = COUNTRY_DISPLAY[tag];
+      if (country) {
+        if (!sections.has(tag)) {
+          sections.set(tag, { key: tag, label: country.label, emoji: country.emoji, order: country.order, stories: [] });
+        }
+        sections.get(tag)!.stories.push({
+          headline: story.headline,
+          summary: story.summary,
+          source: story.source,
+          link: story.link,
+        });
+        assigned = true;
+        break;
+      }
+    }
+    if (assigned) continue;
+
+    // Category sections
+    const catTag = story.category_tags[0] || 'politics';
+    const cat = CATEGORY_DISPLAY[catTag] || CATEGORY_DISPLAY.politics;
+    if (!sections.has(catTag)) {
+      sections.set(catTag, { key: catTag, label: cat.label, emoji: cat.emoji, order: cat.order, stories: [] });
+    }
+    sections.get(catTag)!.stories.push({
+      headline: story.headline,
+      summary: story.summary,
+      source: story.source,
+      link: story.link,
+    });
+  }
+
+  return Array.from(sections.values()).sort((a, b) => a.order - b.order);
+}
+
+// ── Ticker belt rendering ──
+
+function weatherEmoji(conditions: string): string {
+  const c = conditions.toLowerCase();
+  if (c.includes('clear') || c.includes('sunny')) return '☀️';
+  if (c.includes('cloud') || c.includes('overcast')) return '⛅';
+  if (c.includes('rain') || c.includes('drizzle') || c.includes('shower')) return '🌧';
+  if (c.includes('snow')) return '❄️';
+  if (c.includes('thunder')) return '⛈';
+  if (c.includes('fog')) return '🌫';
+  return '🌤';
+}
+
+function renderTickerItems(weather: WeatherData[], markets: MarketData, feedStats: { total: number; succeeded: number }): string {
+  const items: string[] = [];
+  const sep = '<span class="ticker-sep">|</span>';
+
+  for (const loc of weather) {
+    const today = loc.days[0];
+    if (today) {
+      const name = loc.location.split(',')[0];
+      const country = loc.location.includes('Cyprus') ? 'CY' : 'PL';
+      items.push(`<span class="ticker-item"><span class="label">${escapeHtml(name)}, ${country}</span> <span class="val">${today.tempMax}°C ${weatherEmoji(today.conditions)}</span></span>`);
+    }
+  }
+
+  for (const q of markets.quotes) {
+    if (q.price !== null && q.change !== null) {
+      const cls = q.change >= 0 ? 'up' : 'down';
+      const sign = q.change >= 0 ? '+' : '';
+      items.push(`<span class="ticker-item"><span class="label">${escapeHtml(q.name)}</span> <span class="val ${cls}">${sign}${q.change.toFixed(1)}%</span></span>`);
+    }
+  }
+
+  for (const c of markets.currencies) {
+    if (c.rate !== null) {
+      items.push(`<span class="ticker-item"><span class="label">${escapeHtml(c.pair)}</span> <span class="val">${c.rate.toFixed(4)}</span></span>`);
+    }
+  }
+
+  items.push(`<span class="ticker-item"><span class="label">Sources today</span> <span class="val">${feedStats.succeeded} / ${feedStats.total}</span></span>`);
+
+  return items.join(sep);
+}
+
+// ── News columns ──
+
+function renderNewsColumns(sections: LandingSection[]): string {
+  const mid = Math.ceil(sections.length / 2);
+  const left = sections.slice(0, mid);
+  const right = sections.slice(mid);
+
+  const renderCol = (cols: LandingSection[]) =>
+    cols.map(section => `
       <div class="section">
-        <h3 class="section-title"><span class="section-emoji">${section.emoji}</span> ${section.category}</h3>
+        <h3 class="section-title"><span class="section-emoji">${section.emoji}</span> ${escapeHtml(section.label)}</h3>
         ${section.stories.map(story => `
         <article class="story">
-          <h4>${story.headline}</h4>
-          <p>${story.summary}</p>
-          <span class="meta">${story.source} · ${story.time}</span>
+          <h4>${story.link ? `<a href="${escapeHtml(story.link)}" target="_blank" rel="noopener">${escapeHtml(story.headline)}</a>` : escapeHtml(story.headline)}</h4>
+          <p>${escapeHtml(story.summary)}</p>
+          <span class="meta">${escapeHtml(story.source)}</span>
         </article>
         `).join('')}
       </div>
@@ -130,6 +149,68 @@ function renderNewsColumns(): string {
   `;
 }
 
+// ── Sample articles (fallback when KV is empty) ──
+
+const SAMPLE_SECTIONS: LandingSection[] = [
+  {
+    key: 'politics', label: 'Global Politics', emoji: '🏛', order: 1,
+    stories: [
+      { headline: 'EU Leaders Reach Historic Agreement on Digital Infrastructure Investment', summary: 'European Union member states have agreed on a landmark €45 billion package aimed at modernising digital infrastructure across the bloc, with a focus on AI research hubs and cross-border connectivity.', source: 'Politico EU', link: '' },
+      { headline: 'Southeast Asian Nations Form Joint Climate Resilience Task Force', summary: 'ASEAN countries announced a new cooperative framework to address rising sea levels and extreme weather events affecting the region\'s coastal communities.', source: 'Straits Times', link: '' },
+      { headline: 'G7 Finance Ministers Agree on New Framework for Digital Currency Regulation', summary: 'The group of seven industrialised nations has outlined principles for governing central bank digital currencies, seeking common ground on cross-border payments and consumer protection standards.', source: 'BBC Business', link: '' },
+    ],
+  },
+  {
+    key: 'tech_ai', label: 'Tech & AI', emoji: '🤖', order: 2,
+    stories: [
+      { headline: 'Open-Source Language Model Achieves Breakthrough in Multilingual Understanding', summary: 'A consortium of European research labs has released a new open-source language model that sets new benchmarks in understanding and generating text across 47 languages.', source: 'TechCrunch', link: '' },
+      { headline: 'Wearable Health Sensors Now Capable of Real-Time Blood Sugar Monitoring', summary: 'A new generation of non-invasive wearable sensors promises continuous glucose monitoring without finger pricks, potentially transforming diabetes management worldwide.', source: 'Wired', link: '' },
+    ],
+  },
+  {
+    key: 'science', label: 'Science', emoji: '🔬', order: 3,
+    stories: [
+      { headline: 'Deep-Sea Expedition Discovers New Species in Pacific Trench', summary: 'Marine biologists have catalogued over 30 previously unknown species during a month-long expedition to the Kermadec Trench, including bioluminescent organisms at depths exceeding 8,000 metres.', source: 'Nature News', link: '' },
+      { headline: 'CERN Reports Anomalous Results in Latest Particle Collision Data', summary: 'Physicists at the Large Hadron Collider have identified unexpected deviations from the Standard Model in muon decay measurements, prompting calls for independent verification.', source: 'Science Daily', link: '' },
+    ],
+  },
+  {
+    key: 'business', label: 'Business & Markets', emoji: '💼', order: 4,
+    stories: [
+      { headline: 'Global Semiconductor Supply Chains Shift Toward Regional Hubs', summary: 'Major chipmakers are accelerating plans to build fabrication plants in Europe and Southeast Asia, reducing dependency on concentrated production centres amid growing geopolitical tensions.', source: 'Nikkei Asia', link: '' },
+    ],
+  },
+  {
+    key: 'PL', label: 'Poland', emoji: '🇵🇱', order: 10,
+    stories: [
+      { headline: 'Gdańsk Port Expansion Project Enters Final Phase', summary: 'The ambitious expansion of the Port of Gdańsk, set to make it one of the largest container terminals in the Baltic, has entered its final construction phase with completion expected by autumn.', source: 'Gazeta Wyborcza', link: '' },
+      { headline: 'Warsaw Metro Line 3 Receives EU Cohesion Fund Approval', summary: 'The European Commission has approved €1.2 billion in cohesion funding for the third metro line, which will connect the Praga district to the western suburbs by 2031.', source: 'Rzeczpospolita', link: '' },
+    ],
+  },
+  {
+    key: 'CY', label: 'Cyprus', emoji: '🇨🇾', order: 11,
+    stories: [
+      { headline: 'Cyprus Approves New Renewable Energy Targets for 2030', summary: 'The Cypriot parliament has approved an updated national energy plan targeting 35% renewable energy in the electricity mix by 2030, up from the previous goal of 26%.', source: 'Cyprus Mail', link: '' },
+    ],
+  },
+];
+
+const FALLBACK_TICKER = `
+  <span class="ticker-item"><span class="label">Pegeia, CY</span> <span class="val">26°C ☀️</span></span>
+  <span class="ticker-sep">|</span>
+  <span class="ticker-item"><span class="label">Gdańsk, PL</span> <span class="val">11°C 🌧</span></span>
+  <span class="ticker-sep">|</span>
+  <span class="ticker-item"><span class="label">MSCI World</span> <span class="val up">+0.4%</span></span>
+  <span class="ticker-sep">|</span>
+  <span class="ticker-item"><span class="label">Gold</span> <span class="val up">+0.2%</span></span>
+  <span class="ticker-sep">|</span>
+  <span class="ticker-item"><span class="label">EUR/USD</span> <span class="val">1.0812</span></span>
+  <span class="ticker-sep">|</span>
+  <span class="ticker-item"><span class="label">USD/PLN</span> <span class="val down">3.97</span></span>
+`;
+
+// ── Source list ──
+
 const SOURCES = [
   'BBC', 'The Guardian', 'Al Jazeera', 'France 24', 'DW', 'NPR',
   'Politico EU', 'Der Spiegel', 'El País', 'Nikkei Asia', 'SCMP',
@@ -140,14 +221,30 @@ const SOURCES = [
   'Globe and Mail', 'The Hindu', 'Al Arabiya',
 ];
 
-export function buildLandingPage(): string {
-  const today = new Date();
-  const dateStr = today.toLocaleDateString('en-GB', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
+// ── Main export ──
+
+export function buildLandingPage(data?: DigestData | null): string {
+  const isLive = data != null;
+
+  const displayDate = isLive ? data.date : new Date().toISOString().slice(0, 10);
+  const dateObj = new Date(displayDate + 'T12:00:00Z');
+  const dateStr = dateObj.toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
+
+  const tickerContent = isLive
+    ? renderTickerItems(data.weather, data.markets, data.feedStats)
+    : FALLBACK_TICKER;
+
+  let newsColumnsHtml: string;
+  let sampleNote = '';
+  if (isLive) {
+    const sections = groupStoriesIntoSections(data.stories);
+    newsColumnsHtml = renderNewsColumns(sections);
+  } else {
+    newsColumnsHtml = renderNewsColumns(SAMPLE_SECTIONS);
+    sampleNote = '<div class="sample-note">Preview with sample articles — subscribe to receive the real daily digest every morning.</div>';
+  }
 
   const sourceTags = SOURCES.map(s => `<span class="src-tag">${s}</span>`).join('');
 
@@ -218,25 +315,12 @@ export function buildLandingPage(): string {
       align-items: center;
     }
 
-    .ticker-item {
-      white-space: nowrap;
-    }
-
-    .ticker-item .label {
-      color: #8a7e6b;
-    }
-
-    .ticker-item .val {
-      color: #f5f3ee;
-      font-weight: 600;
-    }
-
+    .ticker-item { white-space: nowrap; }
+    .ticker-item .label { color: #8a7e6b; }
+    .ticker-item .val { color: #f5f3ee; font-weight: 600; }
     .ticker-item .up { color: #5a9a5a; }
     .ticker-item .down { color: #c05050; }
-
-    .ticker-sep {
-      color: #555;
-    }
+    .ticker-sep { color: #555; }
 
     /* ── Header ── */
     .header {
@@ -300,14 +384,8 @@ export function buildLandingPage(): string {
       white-space: nowrap;
     }
 
-    .src-tag::after {
-      content: ' ·';
-      color: var(--rule);
-    }
-
-    .src-tag:last-child::after {
-      content: '';
-    }
+    .src-tag::after { content: ' ·'; color: var(--rule); }
+    .src-tag:last-child::after { content: ''; }
 
     /* ── Main layout ── */
     .layout {
@@ -321,9 +399,7 @@ export function buildLandingPage(): string {
     }
 
     /* ── News area (left) ── */
-    .news-area {
-      min-width: 0;
-    }
+    .news-area { min-width: 0; }
 
     .news-label {
       font-size: 11px;
@@ -352,11 +428,7 @@ export function buildLandingPage(): string {
       gap: 24px;
     }
 
-    .col {}
-
-    .section {
-      margin-bottom: 24px;
-    }
+    .section { margin-bottom: 24px; }
 
     .section-title {
       font-size: 17px;
@@ -367,9 +439,7 @@ export function buildLandingPage(): string {
       margin-bottom: 12px;
     }
 
-    .section-emoji {
-      font-style: normal;
-    }
+    .section-emoji { font-style: normal; }
 
     .story {
       margin-bottom: 16px;
@@ -391,6 +461,17 @@ export function buildLandingPage(): string {
       margin-bottom: 4px;
     }
 
+    .story h4 a {
+      color: var(--ink);
+      text-decoration: none;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .story h4 a:hover {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
     .story p {
       font-size: 15px;
       color: #4a4a4a;
@@ -404,10 +485,7 @@ export function buildLandingPage(): string {
     }
 
     /* ── Sidebar (right) ── */
-    .sidebar {
-      position: sticky;
-      top: 24px;
-    }
+    .sidebar { position: sticky; top: 24px; }
 
     .subscribe-box {
       background: var(--cream);
@@ -442,13 +520,8 @@ export function buildLandingPage(): string {
       border-bottom: 1px solid var(--rule);
     }
 
-    .subscribe-box ul li:last-child {
-      border-bottom: none;
-    }
-
-    .subscribe-box ul li strong {
-      color: var(--accent);
-    }
+    .subscribe-box ul li:last-child { border-bottom: none; }
+    .subscribe-box ul li strong { color: var(--accent); }
 
     .signup-form {
       display: flex;
@@ -484,9 +557,7 @@ export function buildLandingPage(): string {
       transition: background 0.2s;
     }
 
-    .signup-form button:hover {
-      background: #6d1d00;
-    }
+    .signup-form button:hover { background: #6d1d00; }
 
     .signup-note {
       font-size: 12px;
@@ -536,49 +607,22 @@ export function buildLandingPage(): string {
 
     /* ── Responsive ── */
     @media (max-width: 860px) {
-      .layout {
-        grid-template-columns: 1fr;
-      }
-
-      .sidebar {
-        position: static;
-        order: -1;
-      }
-
-      .news-columns {
-        grid-template-columns: 1fr;
-      }
-
-      .header h1 {
-        font-size: 30px;
-      }
-
-      .ticker-inner {
-        font-size: 12px;
-      }
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; order: -1; }
+      .news-columns { grid-template-columns: 1fr; }
+      .header h1 { font-size: 30px; }
+      .ticker-inner { font-size: 12px; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Ticker belt: weather + markets + sources count -->
+  <!-- Ticker belt -->
   <div class="ticker">
     <div class="ticker-inner">
       <span class="ticker-label">Live Data</span>
       <div class="ticker-items">
-        <span class="ticker-item"><span class="label">Pegeia, CY</span> <span class="val">26°C ☀️</span></span>
-        <span class="ticker-sep">|</span>
-        <span class="ticker-item"><span class="label">Gdańsk, PL</span> <span class="val">11°C 🌧</span></span>
-        <span class="ticker-sep">|</span>
-        <span class="ticker-item"><span class="label">MSCI World</span> <span class="val up">+0.4%</span></span>
-        <span class="ticker-sep">|</span>
-        <span class="ticker-item"><span class="label">Gold</span> <span class="val up">+0.2%</span></span>
-        <span class="ticker-sep">|</span>
-        <span class="ticker-item"><span class="label">EUR/USD</span> <span class="val">1.0812</span></span>
-        <span class="ticker-sep">|</span>
-        <span class="ticker-item"><span class="label">USD/PLN</span> <span class="val down">3.97</span></span>
-        <span class="ticker-sep">|</span>
-        <span class="ticker-item"><span class="label">Sources today</span> <span class="val">57 / 65</span></span>
+        ${tickerContent}
       </div>
     </div>
   </div>
@@ -599,17 +643,15 @@ export function buildLandingPage(): string {
     <div class="sources-wrap">${sourceTags}</div>
   </div>
 
-  <!-- Main layout: news + sidebar -->
+  <!-- Main layout -->
   <div class="layout">
 
-    <!-- News (left, wide) -->
+    <!-- News (left) -->
     <div class="news-area">
       <div class="news-label">Today's Digest</div>
-      <div class="sample-note">
-        Preview with sample articles — subscribe to receive the real daily digest every morning.
-      </div>
+      ${sampleNote}
       <div class="news-columns">
-        ${renderNewsColumns()}
+        ${newsColumnsHtml}
       </div>
     </div>
 

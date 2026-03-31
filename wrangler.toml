@@ -5,6 +5,10 @@ compatibility_date = "2024-01-01"
 [observability]
 enabled = true
 
+[[kv_namespaces]]
+binding = "DIGEST_KV"
+id = "ef7d3c8046664432a3632f8a5777a95a"
+
 [triggers]
 crons = ["0 4 * * *"]  # 04:00 UTC daily (06:00 Cyprus, 05:00 Poland)
 

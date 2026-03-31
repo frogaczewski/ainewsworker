@@ -3,6 +3,7 @@ export interface Env {
   MAILJET_API_KEY: string;
   MAILJET_SECRET_KEY: string;
   TRIGGER_TOKEN?: string;
+  DIGEST_KV: KVNamespace;
 }
 
 export interface RssFeedConfig {
@@ -98,4 +99,12 @@ export interface FeedStatus {
   ok: boolean;
   itemCount: number;
   error?: string;
+}
+
+export interface DigestData {
+  date: string;
+  stories: TriagedStory[];
+  weather: WeatherData[];
+  markets: MarketData;
+  feedStats: { total: number; succeeded: number };
 }

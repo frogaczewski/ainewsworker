@@ -6,7 +6,7 @@ import { buildTriagePrompt, buildCompilationPrompt, buildTranslationPrompt } fro
 import { sendDigestEmail, sendErrorEmail } from './email';
 import { EMAIL_TO_PL } from './config';
 import { buildLandingPage } from './landing';
-import type { Env, TriagedStory, FeedStatus } from './types';
+import type { Env, TriagedStory, FeedStatus, DigestData } from './types';
 
 async function runPipeline(env: Env): Promise<string> {
   console.log('[Pipeline] Starting daily news digest...');
@@ -80,6 +80,26 @@ async function runPipeline(env: Env): Promise<string> {
         editorial: item.editorial,
       }));
     }
+  }
+
+  // Save triaged stories + weather + markets to KV for the landing page
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const digestData: DigestData = {
+      date: today,
+      stories: triagedStories,
+      weather,
+      markets,
+      feedStats: { total: feedResult.total, succeeded: feedResult.total - feedResult.failed },
+    };
+    const json = JSON.stringify(digestData);
+    await Promise.all([
+      env.DIGEST_KV.put('digest:latest', json, { expirationTtl: 259200 }),
+      env.DIGEST_KV.put(`digest:${today}`, json, { expirationTtl: 259200 }),
+    ]);
+    console.log(`[Pipeline] Saved ${triagedStories.length} stories to KV (${json.length} bytes)`);
+  } catch (err) {
+    console.error(`[Pipeline] KV save failed (non-fatal): ${err}`);
   }
 
   // Step 5: Sonnet compilation
@@ -284,8 +304,19 @@ export default {
 
     // Landing page
     if (url.pathname === '/' && request.method === 'GET') {
-      return new Response(buildLandingPage(), {
-        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      let digestData: DigestData | null = null;
+      try {
+        const raw = await env.DIGEST_KV.get('digest:latest');
+        if (raw) digestData = JSON.parse(raw) as DigestData;
+      } catch (err) {
+        console.error(`[Landing] KV read failed: ${err}`);
+      }
+
+      return new Response(buildLandingPage(digestData), {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=300',
+        },
       });
     }
 
