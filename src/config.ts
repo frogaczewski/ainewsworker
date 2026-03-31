@@ -33,6 +33,11 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Meduza', url: 'https://meduza.io/rss/en/all', category: 'global' },
   { name: 'Moscow Times', url: 'https://www.themoscowtimes.com/rss/news', category: 'global' },
 
+  // Ukraine
+  { name: 'Kyiv Independent', url: 'https://kyivindependent.com/feed/', category: 'global' },
+  { name: 'Ukrinform', url: 'https://www.ukrinform.net/rss/block-lastnews', category: 'global' },
+  { name: 'Ukrainska Pravda', url: 'https://www.pravda.com.ua/eng/rss/', category: 'global' },
+
   // South Asia
   { name: 'Times of India', url: 'https://timesofindia.indiatimes.com/rssfeedstopstories.cms', category: 'global' },
   { name: 'The Hindu', url: 'https://www.thehindu.com/news/international/feeder/default.rss', category: 'global' },
@@ -121,13 +126,16 @@ export const CURRENCY_PAIRS: CurrencyPair[] = [
   { from: 'EUR', to: 'USD' },
 ];
 
-export const COUNTRIES_OF_INTEREST = ['PL', 'CY', 'NP', 'CN', 'DE', 'FR', 'IT', 'ES', 'GB', 'US', 'EU'];
+export const COUNTRIES_OF_INTEREST = ['PL', 'CY', 'NP', 'UA', 'CN', 'DE', 'FR', 'IT', 'ES', 'GB', 'US', 'EU'];
 
 export const CATEGORIES = ['tech_ai', 'climate', 'politics', 'science', 'business', 'health'];
 
 export const EMAIL_FROM = { email: 'ainews@rogaczewski.me', name: 'AI News Digest' };
 export const EMAIL_TO = { email: 'frogaczewski@gmail.com', name: 'Filip Rogaczewski' };
-export const EMAIL_TO_PL = { email: 'jarrog@gmail.com', name: 'Jarosław Rogaczewski' };
+export const EMAIL_TO_PL = [
+  { email: 'jarrog@gmail.com', name: 'Jarosław Rogaczewski' },
+  { email: 'adytczew@o2.pl', name: 'Adytczew' },
+];
 
 export const WMO_WEATHER_CODES: Record<number, string> = {
   0: 'Clear sky',

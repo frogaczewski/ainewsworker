@@ -1,4 +1,4 @@
-import { EMAIL_FROM, EMAIL_TO, EMAIL_TO_PL } from './config';
+import { EMAIL_FROM, EMAIL_TO } from './config';
 import type { Env, FeedStatus } from './types';
 
 export function markdownToHtml(md: string): string {

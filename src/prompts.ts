@@ -30,7 +30,7 @@ Below are headlines and summaries from ~35 news sources published in the last 24
 4. CONFLICTING REPORTS: When sources report the same event with different framing, different facts, or contradictory narratives (e.g., Western vs non-Western media, right-wing vs left-wing outlets, global south vs developed world perspectives), set "conflicting": true and provide a brief "conflict_note" explaining the key difference (e.g., "Western sources emphasize sanctions impact, while Xinhua focuses on diplomatic overtures").
 
 5. Prioritize:
-   - MUST INCLUDE: Always select stories about Poland, Cyprus, and Nepal — these are the reader's home countries. Include at least 2-3 Nepal stories if any exist in the feed.
+   - MUST INCLUDE: Always select stories about Poland, Cyprus, Nepal, and Ukraine (especially war/conflict updates) — these are the reader's priority countries. Include at least 2-3 Nepal stories if any exist in the feed.
    - Stories directly about China, Germany, France, Italy, Spain, UK, US, EU
    - Major global events (wars, elections, disasters, breakthroughs)
    - Technology/AI developments
@@ -86,7 +86,7 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 
 ---
 
-[ALWAYS include a section for every country in this list: PL, CY, NP, CN, DE, FR, IT, ES, GB, US, EU — using flag emoji + country name as an h3 header. If a country has news, write the stories. If a country has no significant standalone stories today, still include the section with a brief note (e.g. "No major standalone stories today, though French outlets contributed coverage cited in other sections." or "A quiet news day from Nepal."). Cap the US section to 5-6 of the most important stories — do not include every US story.]
+[ALWAYS include a section for every country in this list: PL, CY, NP, UA, CN, DE, FR, IT, ES, GB, US, EU — using flag emoji + country name as an h3 header. If a country has news, write the stories. If a country has no significant standalone stories today, still include the section with a brief note (e.g. "No major standalone stories today, though French outlets contributed coverage cited in other sections." or "A quiet news day from Nepal."). For Ukraine (UA), always include the latest on the war/conflict — frontline updates, diplomatic developments, humanitarian impact, and international response. Cross-reference Ukrainian sources (Kyiv Independent, Ukrinform, Ukrainska Pravda) with Russian sources (TASS, Meduza, Moscow Times) to highlight differing narratives. Cap the US section to 5-6 of the most important stories — do not include every US story.]
 
 ---
 

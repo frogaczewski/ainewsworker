@@ -202,12 +202,14 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   ];
 
   if (polishDigest) {
-    emailTasks.push(
-      sendDigestEmail(env, polishDigest, feedResult.feedStatuses, EMAIL_TO_PL, `Codzienny Przegląd Wiadomości — ${plDateStr}`).catch(async () => {
-        console.log('[Pipeline] Polish email failed, retrying once...');
-        await sendDigestEmail(env, polishDigest, feedResult.feedStatuses, EMAIL_TO_PL, `Codzienny Przegląd Wiadomości — ${plDateStr}`);
-      }),
-    );
+    for (const plRecipient of EMAIL_TO_PL) {
+      emailTasks.push(
+        sendDigestEmail(env, polishDigest, feedResult.feedStatuses, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`).catch(async () => {
+          console.log(`[Pipeline] Polish email to ${plRecipient.email} failed, retrying once...`);
+          await sendDigestEmail(env, polishDigest, feedResult.feedStatuses, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`);
+        }),
+      );
+    }
   }
 
   await Promise.all(emailTasks);
