@@ -26,7 +26,7 @@ function rewriteStoryLinks(markdown: string, websiteUrl: string, date: string): 
     }
 
     // Replace generic links with story-specific links
-    if (lastHeaderSlug && lines[i].includes(`](${websiteUrl})`) || lines[i].includes(`](${baseUrl})`)) {
+    if (lastHeaderSlug && (lines[i].includes(`](${websiteUrl})`) || lines[i].includes(`](${baseUrl})`))) {
       const storyUrl = `${baseUrl}/story/${date}/${lastHeaderSlug}`;
       lines[i] = lines[i]
         .replace(`](${websiteUrl})`, `](${storyUrl})`)
