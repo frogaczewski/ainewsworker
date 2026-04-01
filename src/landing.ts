@@ -190,6 +190,8 @@ const PAGE_STYLES = `<style>
 
   .digest-content h1 { font-size: 26px; font-weight: 700; color: var(--ink); border-bottom: 3px solid var(--accent); padding-bottom: 12px; margin: 0 0 16px; }
   .digest-content h2 { font-size: 21px; font-weight: 700; color: var(--accent); margin: 28px 0 14px; padding-bottom: 6px; border-bottom: 1px solid var(--rule); }
+  .digest-content h2 a { color: var(--accent); text-decoration: none; border-bottom: none; }
+  .digest-content h2 a:hover { border-bottom: 2px solid var(--accent); }
   .digest-content h3 { font-size: 18px; font-weight: 700; color: var(--heading); margin: 20px 0 10px; }
   .digest-content p { font-size: 16px; color: var(--ink); margin: 8px 0; }
   .digest-content strong { color: var(--ink); } .digest-content em { color: var(--muted); }
@@ -300,6 +302,18 @@ function pageFooter(): string {
 </html>`;
 }
 
+// ── Header linkification ──
+
+/** Turn <h2> tags into clickable links to /story/{date}/{slug} */
+function linkifyHeaders(html: string, date: string): string {
+  return html.replace(/<h2>(.*?)<\/h2>/g, (_match, content) => {
+    const textOnly = content.replace(/<[^>]*>/g, '').trim();
+    const slug = generateSlug(textOnly);
+    if (!slug) return `<h2>${content}</h2>`;
+    return `<h2><a href="/story/${date}/${slug}">${content}</a></h2>`;
+  });
+}
+
 // ── Main export: landing page ──
 
 export function buildLandingPage(data?: DigestData | null): string {
@@ -317,7 +331,10 @@ export function buildLandingPage(data?: DigestData | null): string {
     : FALLBACK_TICKER;
 
   const digestMd = hasDigest ? data.digestMarkdown! : SAMPLE_DIGEST;
-  const digestHtml = markdownToHtml(digestMd);
+  let digestHtml = markdownToHtml(digestMd);
+  if (hasDigest) {
+    digestHtml = linkifyHeaders(digestHtml, data.date);
+  }
 
   const sampleNote = hasDigest
     ? ''
