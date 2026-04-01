@@ -2,14 +2,15 @@ import { fetchAllFeeds } from './feeds';
 import { fetchWeather } from './weather';
 import { fetchMarketData } from './markets';
 import { callHaiku, callSonnet } from './llm';
-import { buildTriagePrompt, buildCompilationPrompt, buildTranslationPrompt } from './prompts';
+import { buildTriagePrompt, buildCompilationPrompt, buildEmailBriefingPrompt, buildTranslationPrompt } from './prompts';
 import { sendDigestEmail, sendErrorEmail } from './email';
 import { EMAIL_TO_PL } from './config';
-import { buildLandingPage } from './landing';
+import { buildLandingPage, buildStoryPage } from './landing';
 import type { Env, TriagedStory, FeedStatus, DigestData } from './types';
 
 interface PipelineOptions {
-  dryRun?: boolean; // skip compilation, translation, and emails — just populate KV
+  dryRun?: boolean;  // skip compilation, translation, and emails — just populate KV
+  testMode?: boolean; // run full pipeline but only email frogaczewski@gmail.com (skip Polish)
 }
 
 async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string> {
@@ -108,9 +109,9 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     return 'dry-run-success';
   }
 
-  // Step 5: Sonnet compilation
-  console.log('[Pipeline] Step 5: Compiling digest with Sonnet...');
-  let digest: string;
+  // Step 5a: Sonnet — full digest for website
+  console.log('[Pipeline] Step 5a: Compiling full digest with Sonnet...');
+  let fullDigest: string;
 
   try {
     const compilationPrompt = buildCompilationPrompt(
@@ -119,7 +120,7 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
       markets,
       { total: feedResult.total, failed: feedResult.failed },
     );
-    digest = await callSonnet(env, compilationPrompt);
+    fullDigest = await callSonnet(env, compilationPrompt);
   } catch (err) {
     console.log('[Pipeline] Sonnet compilation failed, retrying once...');
     const compilationPrompt = buildCompilationPrompt(
@@ -128,12 +129,26 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
       markets,
       { total: feedResult.total, failed: feedResult.failed },
     );
-    digest = await callSonnet(env, compilationPrompt);
+    fullDigest = await callSonnet(env, compilationPrompt);
   }
 
-  console.log(`[Pipeline] Digest compiled (${digest.length} characters)`);
+  console.log(`[Pipeline] Full digest compiled (${fullDigest.length} characters)`);
 
-  // Save everything to KV — including the compiled Sonnet digest
+  // Step 5b: Sonnet — email briefing (shorter, with links to website)
+  console.log('[Pipeline] Step 5b: Generating email briefing with Sonnet...');
+  const websiteUrl = 'https://ainewsworker.rogaczewski-dev.workers.dev';
+  let emailBriefing: string;
+
+  try {
+    emailBriefing = await callSonnet(env, buildEmailBriefingPrompt(fullDigest, websiteUrl));
+  } catch (err) {
+    console.log('[Pipeline] Email briefing failed, retrying once...');
+    emailBriefing = await callSonnet(env, buildEmailBriefingPrompt(fullDigest, websiteUrl));
+  }
+
+  console.log(`[Pipeline] Email briefing compiled (${emailBriefing.length} characters)`);
+
+  // Save everything to KV — full digest + email briefing
   try {
     const today = new Date().toISOString().slice(0, 10);
     const digestData: DigestData = {
@@ -142,7 +157,8 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
       weather,
       markets,
       feedStats: { total: feedResult.total, succeeded: feedResult.total - feedResult.failed },
-      digestMarkdown: digest,
+      digestMarkdown: fullDigest,
+      emailMarkdown: emailBriefing,
     };
     const json = JSON.stringify(digestData);
     await Promise.all([
@@ -157,31 +173,37 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     if (dateIndex.length > 90) dateIndex.length = 90; // keep ~3 months
     await env.DIGEST_KV.put('articles:index', JSON.stringify(dateIndex));
 
-    console.log(`[Pipeline] Saved digest + ${triagedStories.length} stories to KV (${json.length} bytes), index: ${dateIndex.length} dates`);
+    console.log(`[Pipeline] Saved digest to KV (${json.length} bytes), index: ${dateIndex.length} dates`);
   } catch (err) {
     console.error(`[Pipeline] KV save failed (non-fatal): ${err}`);
   }
 
-  // Step 6: Translate to Polish with Sonnet
-  console.log('[Pipeline] Step 6: Translating digest to Polish with Sonnet...');
-  let polishDigest: string;
+  // Test mode: send only English email to Filip, skip Polish
+  if (opts.testMode) {
+    console.log('[Pipeline] Test mode — sending email only to Filip...');
+    await sendDigestEmail(env, emailBriefing, feedResult.feedStatuses);
+    console.log('[Pipeline] Test mode complete');
+    return 'test-success';
+  }
+
+  // Step 6: Translate email briefing to Polish with Sonnet
+  console.log('[Pipeline] Step 6: Translating email briefing to Polish...');
+  let polishBriefing: string;
 
   try {
-    const translationPrompt = buildTranslationPrompt(digest);
-    polishDigest = await callSonnet(env, translationPrompt);
+    polishBriefing = await callSonnet(env, buildTranslationPrompt(emailBriefing));
   } catch (err) {
     console.log('[Pipeline] Polish translation failed, retrying once...');
     try {
-      const translationPrompt = buildTranslationPrompt(digest);
-      polishDigest = await callSonnet(env, translationPrompt);
+      polishBriefing = await callSonnet(env, buildTranslationPrompt(emailBriefing));
     } catch (retryErr) {
       const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
       console.log(`[Pipeline] Polish translation retry also failed: ${retryMsg}`);
-      polishDigest = ''; // Skip Polish email if translation fails
+      polishBriefing = '';
     }
   }
 
-  console.log(`[Pipeline] Polish translation: ${polishDigest.length} characters`);
+  console.log(`[Pipeline] Polish translation: ${polishBriefing.length} characters`);
 
   // Step 7: Send emails (English + Polish in parallel)
   console.log('[Pipeline] Step 7: Sending emails...');
@@ -195,18 +217,18 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   });
 
   const emailTasks: Promise<void>[] = [
-    sendDigestEmail(env, digest, feedResult.feedStatuses).catch(async () => {
+    sendDigestEmail(env, emailBriefing, feedResult.feedStatuses).catch(async () => {
       console.log('[Pipeline] English email failed, retrying once...');
-      await sendDigestEmail(env, digest, feedResult.feedStatuses);
+      await sendDigestEmail(env, emailBriefing, feedResult.feedStatuses);
     }),
   ];
 
-  if (polishDigest) {
+  if (polishBriefing) {
     for (const plRecipient of EMAIL_TO_PL) {
       emailTasks.push(
-        sendDigestEmail(env, polishDigest, feedResult.feedStatuses, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`).catch(async () => {
+        sendDigestEmail(env, polishBriefing, feedResult.feedStatuses, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`).catch(async () => {
           console.log(`[Pipeline] Polish email to ${plRecipient.email} failed, retrying once...`);
-          await sendDigestEmail(env, polishDigest, feedResult.feedStatuses, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`);
+          await sendDigestEmail(env, polishBriefing, feedResult.feedStatuses, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`);
         }),
       );
     }
@@ -303,8 +325,9 @@ export default {
       // Run synchronously — the response keeps the connection open, giving us
       // the full wall-clock allowance. Streaming LLM calls keep it alive.
       const dryRun = url.searchParams.get('dry') === 'true';
+      const testMode = url.searchParams.get('test') === 'true';
       try {
-        const result = await runPipeline(env, { dryRun });
+        const result = await runPipeline(env, { dryRun, testMode });
         return new Response(JSON.stringify({ status: 'success', result }), {
           headers: { 'Content-Type': 'application/json' },
         });
@@ -354,6 +377,36 @@ export default {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'public, max-age=300',
+        },
+      });
+    }
+
+    // Story page: /story/{date}/{slug}
+    if (url.pathname.startsWith('/story/') && request.method === 'GET') {
+      const parts = url.pathname.split('/');
+      const date = parts[2]; // e.g. '2026-04-01'
+      const slug = parts[3]; // e.g. 'iran-war-main-briefing'
+
+      if (!date || !slug) {
+        return new Response('Not found', { status: 404 });
+      }
+
+      let digestData: DigestData | null = null;
+      try {
+        const raw = await env.DIGEST_KV.get(`digest:${date}`);
+        if (raw) digestData = JSON.parse(raw) as DigestData;
+      } catch (err) {
+        console.error(`[Story] KV read failed: ${err}`);
+      }
+
+      if (!digestData?.digestMarkdown) {
+        return new Response('Not found', { status: 404 });
+      }
+
+      return new Response(buildStoryPage(digestData, slug), {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=3600',
         },
       });
     }

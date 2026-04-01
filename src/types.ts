@@ -107,5 +107,6 @@ export interface DigestData {
   weather: WeatherData[];
   markets: MarketData;
   feedStats: { total: number; succeeded: number };
-  digestMarkdown?: string; // compiled Sonnet digest (the email content)
+  digestMarkdown?: string; // full Sonnet digest (website version)
+  emailMarkdown?: string;  // condensed email briefing with links to website
 }

@@ -9,6 +9,45 @@ function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+export function generateSlug(text: string): string {
+  return text.toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 60)
+    .replace(/-$/, '');
+}
+
+/** Extract a section from digest markdown by matching slug against h2/h3 headers */
+function extractSectionBySlug(markdown: string, slug: string): string | null {
+  const lines = markdown.split('\n');
+  let capturing = false;
+  let captured: string[] = [];
+  const headerLevel = /^(#{2,3})\s+/;
+
+  for (const line of lines) {
+    const match = line.match(headerLevel);
+    if (match) {
+      // Check if this header's slug matches
+      const headerText = line.replace(headerLevel, '').trim();
+      const headerSlug = generateSlug(headerText);
+      if (headerSlug === slug) {
+        capturing = true;
+        captured.push(line);
+        continue;
+      } else if (capturing) {
+        // Hit the next header at same or higher level — stop
+        break;
+      }
+    }
+    if (capturing) {
+      captured.push(line);
+    }
+  }
+
+  return captured.length > 0 ? captured.join('\n').trim() : null;
+}
+
 // ── Ticker belt rendering ──
 
 function weatherEmoji(conditions: string): string {
@@ -611,6 +650,93 @@ export function buildLandingPage(data?: DigestData | null): string {
     <p>Built on Cloudflare Workers</p>
   </footer>
 
+</body>
+</html>`;
+}
+
+/** Render a single story/section page, extracted from the full digest by slug */
+export function buildStoryPage(data: DigestData, slug: string): string {
+  const sectionMd = data.digestMarkdown ? extractSectionBySlug(data.digestMarkdown, slug) : null;
+
+  if (!sectionMd) {
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Not Found</title></head><body><h1>Story not found</h1><p><a href="/">Back to digest</a></p></body></html>`;
+  }
+
+  const sectionHtml = markdownToHtml(sectionMd);
+  const dateObj = new Date(data.date + 'T12:00:00Z');
+  const dateStr = dateObj.toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+
+  const tickerContent = renderTickerItems(data.weather, data.markets, data.feedStats);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI News Digest — ${slug.replace(/-/g, ' ')}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --ink: #1a1a1a; --paper: #faf9f6; --cream: #f5f3ee; --rule: #d4c9b8;
+      --muted: #8a7e6b; --accent: #8b2500; --heading: #3d2b1f;
+      --table-header: #D4835E; --table-header-text: #FAF6F0; --table-even: #F0EBE3;
+    }
+    body { font-family: 'EB Garamond', Georgia, serif; line-height: 1.65; color: var(--ink); background: var(--paper); }
+
+    .ticker { background: var(--ink); color: #d4c9b8; font-size: 13px; padding: 6px 0; }
+    .ticker-inner { max-width: 900px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+    .ticker-label { font-weight: 700; color: #f5f3ee; text-transform: uppercase; font-size: 10px; letter-spacing: 1.5px; }
+    .ticker-items { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+    .ticker-item { white-space: nowrap; }
+    .ticker-item .label { color: #8a7e6b; }
+    .ticker-item .val { color: #f5f3ee; font-weight: 600; }
+    .ticker-item .up { color: #5a9a5a; }
+    .ticker-item .down { color: #c05050; }
+    .ticker-sep { color: #555; }
+
+    .story-container { max-width: 900px; margin: 0 auto; padding: 32px 24px 60px; }
+    .back-link { font-size: 14px; color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--rule); }
+    .back-link:hover { border-bottom-color: var(--accent); }
+    .story-date { font-size: 14px; color: var(--muted); font-style: italic; margin: 12px 0 24px; }
+
+    .story-content h2 { font-size: 24px; font-weight: 700; color: var(--accent); margin: 28px 0 14px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+    .story-content h3 { font-size: 20px; font-weight: 700; color: var(--heading); margin: 20px 0 10px; }
+    .story-content p { font-size: 17px; color: var(--ink); margin: 10px 0; }
+    .story-content strong { color: var(--ink); }
+    .story-content em { color: var(--muted); }
+    .story-content a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--rule); }
+    .story-content a:hover { border-bottom-color: var(--accent); }
+    .story-content hr { border: none; border-top: 1px solid var(--rule); margin: 24px 0; }
+    .story-content ul { padding-left: 20px; margin: 8px 0; }
+    .story-content li { margin: 6px 0; font-size: 17px; }
+    .story-content table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 15px; }
+    .story-content th { background: var(--table-header); color: var(--table-header-text); padding: 10px 14px; text-align: left; font-weight: 600; }
+    .story-content td { padding: 8px 14px; border-bottom: 1px solid var(--rule); }
+    .story-content tr:nth-child(even) { background: var(--table-even); }
+
+    .footer { max-width: 900px; margin: 0 auto; padding: 20px 24px; border-top: 2px solid var(--ink); text-align: center; }
+    .footer p { font-size: 13px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="ticker"><div class="ticker-inner"><span class="ticker-label">Live Data</span><div class="ticker-items">${tickerContent}</div></div></div>
+
+  <div class="story-container">
+    <a href="/" class="back-link">← Back to full digest</a>
+    <p class="story-date">${dateStr}</p>
+    <div class="story-content">
+      ${sectionHtml}
+    </div>
+  </div>
+
+  <footer class="footer">
+    <p>AI News Digest — compiled daily from 38+ international sources by Claude</p>
+  </footer>
 </body>
 </html>`;
 }

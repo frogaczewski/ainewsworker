@@ -74,9 +74,9 @@ export function buildCompilationPrompt(
     ? `${feedStats.total - feedStats.failed} of ${feedStats.total} sources responded`
     : `${feedStats.total} sources`;
 
-  return `You are writing a daily news digest for Filip, who lives in Pegeia, Cyprus and has ties to Poland. He follows technology, climate, science, global politics, and business closely.
+  return `You are writing a daily news digest for Filip, who lives in Pegeia, Cyprus and has ties to Poland. He follows technology, climate, science, global politics, and business closely. This digest will be published on a website.
 
-Write a comprehensive, well-organized daily digest in markdown. Each story should be 3-6 sentences — thorough enough that the reader never needs to click through to the original article. Include key facts, figures, quotes, and context. Always cite sources as clickable markdown links: ([Source Name](url)). When the same story appeared in multiple outlets, mention that for credibility. When stories have conflicting coverage between sources (flagged with "conflicting": true), explicitly describe how different outlets reported it differently — e.g., how right-wing vs left-wing media framed it, or how global south vs developed world perspectives diverge. Do NOT use markdown blockquote syntax (lines starting with >) as it does not render well in email.
+Write a comprehensive, well-organized daily digest in markdown. Each story should be 3-6 sentences — thorough enough that the reader never needs to click through to the original article. Include key facts, figures, quotes, and context. Always cite sources as clickable markdown links: ([Source Name](url)). When the same story appeared in multiple outlets, mention that for credibility. When stories have conflicting coverage between sources (flagged with "conflicting": true), explicitly describe how different outlets reported it differently. Do NOT use markdown blockquote syntax (lines starting with >) as it does not render well in email.
 
 ## FORMAT
 
@@ -86,29 +86,35 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 
 ---
 
-[ALWAYS include a section for every country in this list: PL, CY, NP, UA, CN, DE, FR, IT, ES, GB, US, EU — using flag emoji + country name as an h3 header. If a country has news, write the stories. If a country has no significant standalone stories today, still include the section with a brief note (e.g. "No major standalone stories today, though French outlets contributed coverage cited in other sections." or "A quiet news day from Nepal."). For Ukraine (UA), always include the latest on the war/conflict — frontline updates, diplomatic developments, humanitarian impact, and international response. Cross-reference Ukrainian sources (Kyiv Independent, Ukrinform, Ukrainska Pravda) with Russian sources (TASS, Meduza, Moscow Times) to highlight differing narratives. Cap the US section to 5-6 of the most important stories — do not include every US story.]
+[Country sections — use flag emoji + country name as h2 headers]
+
+ALWAYS include sections for: 🇵🇱 Poland, 🇨🇾 Cyprus, 🇳🇵 Nepal, 🇺🇦 Ukraine — these are priority countries, always present even on quiet days. For Ukraine, always include the latest on the war/conflict — frontline updates, diplomatic developments, humanitarian impact. Cross-reference Ukrainian sources (Kyiv Independent, Ukrinform, Ukrainska Pravda) with Russian sources (TASS, Meduza, Moscow Times) to highlight differing narratives.
+
+For other countries (CN, DE, FR, IT, ES, GB, US, EU): ONLY include a section if there are significant standalone stories. Do NOT include empty "quiet day" or "no news" filler sections — simply omit the country.
+
+🇺🇸 United States: Max 2-3 stories with clear INTERNATIONAL impact (e.g. policy affecting other nations, global market moves, major military actions). Domestic-only stories (court rulings, agency relocations, domestic culture wars) go to "Also Notable" bullets instead. This digest is for non-US readers.
 
 ---
 
-[For each category with news: 🤖 Technology and AI, 🌍 Climate and Environment, 🏛️ Global Politics, 🔬 Science and Research, 💼 Business and Economy, 🏥 Health and Medicine — use h3 headers for each category]
+[Category sections — use h2 headers with emoji: 🤖 Technology and AI, 🌍 Climate and Environment, 🏛️ Global Politics, 🔬 Science and Research, 💼 Business and Economy, 🏥 Health and Medicine. Only include categories that have stories.]
 
 ---
 
 ## 🌏 Global South & Regional Roundup
 
-[ALWAYS include this section. Pick 1 notable story from each of these regions: Africa, Latin America, Central Asia, and South/Southeast Asia. These should be stories told from local perspectives — not just Western coverage of those regions. If a region has no stories, note that briefly. Use sub-headers for each region.]
+Pick 3-4 notable stories from the Global South (Africa, Latin America, Caribbean, Central Asia, South/Southeast Asia). Only include regions that have actual stories — skip regions with nothing. Use correct geography: Haiti = Caribbean/Latin America (NOT Africa), Pakistan = South Asia, etc. These should be stories told from local perspectives — not just Western coverage of those regions.
 
 ---
 
 ## 📌 Also Notable
 
-[Brief bullet points of other significant stories that don't fit above]
+[Brief bullet points of other significant stories that don't fit above, including US domestic stories]
 
 ---
 
-## 📰 Editorial Deep Dives
+## 📰 Editorial Picks
 
-[Select 2-3 of the best editorial/investigative articles from sources marked "editorial": true. These are from non-paywalled, independent, and open-source journalism outlets (Bellingcat, The Conversation, The Intercept, Global Voices, Carbon Brief, The Markup, OCCRP, IPS News, Mongabay, ProPublica). For each, write a thorough 10-12 sentence summary that captures the full argument, key evidence, and conclusions — the reader should feel they've read the article. Include the source link.]
+[Select 2-3 of the best editorial/investigative articles from sources marked "editorial": true (Bellingcat, The Conversation, The Intercept, Global Voices, Carbon Brief, The Markup, OCCRP, IPS News, Mongabay, ProPublica). For each: write 1-2 sentences summarising the core argument, then link the source. Keep it brief — the reader can click through.]
 
 ---
 
@@ -117,6 +123,8 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 | Index / Asset | Value | Change |
 |---|---|---|
 [MARKET_DATA_HERE]
+
+[Add 1-2 sentences of market commentary below the table]
 
 ---
 
@@ -133,22 +141,19 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 [WEATHER_DATA_HERE]
 
 ---
-*Generated automatically by AI News Digest*
+*Generated automatically by AI News Digest. [Read the full digest online.](https://ainewsworker.rogaczewski-dev.workers.dev/)*
 
 ## GUIDELINES
-- Each story should be 3-6 sentences — comprehensive enough that the reader never needs to leave the newsletter
-- Include key facts, figures, direct quotes, and relevant context for each story
-- Always cite sources as clickable markdown links: ([Source Name](url)). Use the article URLs provided in the story data
+- Target approximately 2,500-3,000 words for the entire digest
+- Each story: 3-6 sentences, comprehensive enough that the reader never needs to click through
+- FORMATTING: Each story MUST be its own paragraph, separated by a blank line from the previous story. Never put multiple stories in the same paragraph
+- Always cite sources as clickable markdown links: ([Source Name](url))
 - When the same story appears in multiple outlets, note that and link multiple sources
-- When stories are flagged as "conflicting", describe how different sources reported it differently (e.g., Western vs non-Western framing, political bias differences, global south vs developed world perspectives)
+- When stories are flagged as "conflicting", describe how different sources framed it differently
 - Focus on what matters to someone in Cyprus with ties to Poland
-- Use flag emojis for country headers
-- Cap the United States section to 5-6 stories maximum — pick only the most significant
 - Stories about the same event should be consolidated, not repeated across sections
 - Include soccer/football, space, photography news only when truly significant
-- The digest should be informative enough to replace reading the news entirely
-- For the "Editorial Deep Dives" section: pick the 2-3 most compelling editorial/investigative pieces (marked editorial: true). Summarize each in 10-12 sentences — capture the full thesis, key evidence, notable quotes, and conclusions. The reader should feel they've read the original.
-- Do NOT use markdown blockquote syntax (lines starting with >) — it does not render in email
+- Do NOT use markdown blockquote syntax (lines starting with >)
 
 === TRIAGED STORIES ===
 ${storiesJson}
@@ -158,6 +163,26 @@ ${weatherJson}
 
 === MARKET DATA ===
 ${marketsJson}`;
+}
+
+export function buildEmailBriefingPrompt(fullDigest: string, websiteUrl: string): string {
+  return `You are condensing a full news digest into a concise email briefing. The full digest is published on a website — the email should give readers the key headlines and encourage them to read the full version online.
+
+## RULES
+- For each story in the digest: write a 1-2 sentence summary capturing the single most important fact
+- After each section, add a link: [Read full coverage →](${websiteUrl})
+- Keep the title, date line, and compiled-from note exactly as they are
+- Keep the weather tables and markets table exactly as they are (copy verbatim)
+- REMOVE the "Also Notable" section — replace with: "**[See all stories on the website →](${websiteUrl})**"
+- REMOVE the "Editorial Picks" details — replace with: "**[Read today's editorial picks →](${websiteUrl})**" and just list the titles
+- Each story MUST be its own paragraph, separated by a blank line
+- Add at the very top (before the title): *[Read the full digest online →](${websiteUrl})*
+- Target: 1,000-1,500 words maximum
+- Do NOT use markdown blockquote syntax (lines starting with >)
+- Preserve all markdown formatting: headers, bold, links, tables, horizontal rules
+
+## FULL DIGEST TO CONDENSE
+${fullDigest}`;
 }
 
 export function buildTranslationPrompt(digest: string): string {
