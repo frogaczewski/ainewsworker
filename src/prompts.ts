@@ -78,7 +78,7 @@ export function buildCompilationPrompt(
 
 Write a comprehensive, well-organized daily digest in markdown. Each story should be 3-6 sentences — thorough enough that the reader never needs to click through to the original article. Include key facts, figures, quotes, and context. Always cite sources as clickable markdown links: ([Source Name](url)). When the same story appeared in multiple outlets, mention that for credibility. When stories have conflicting coverage between sources (flagged with "conflicting": true), explicitly describe how different outlets reported it differently. Do NOT use markdown blockquote syntax (lines starting with >) as it does not render well in email.
 
-## FORMAT
+## SECTION ORDER (follow this exact order)
 
 # Daily News Digest — ${dateStr}
 
@@ -86,35 +86,46 @@ Write a comprehensive, well-organized daily digest in markdown. Each story shoul
 
 ---
 
-[Country sections — use flag emoji + country name as h2 headers]
+## 🏛️ Global Politics
 
-ALWAYS include sections for: 🇵🇱 Poland, 🇨🇾 Cyprus, 🇳🇵 Nepal, 🇺🇦 Ukraine — these are priority countries, always present even on quiet days. For Ukraine, always include the latest on the war/conflict — frontline updates, diplomatic developments, humanitarian impact. Cross-reference Ukrainian sources (Kyiv Independent, Ukrinform, Ukrainska Pravda) with Russian sources (TASS, Meduza, Moscow Times) to highlight differing narratives.
-
-For other countries (CN, DE, FR, IT, ES, GB, US, EU): ONLY include a section if there are significant standalone stories. Do NOT include empty "quiet day" or "no news" filler sections — simply omit the country.
-
-🇺🇸 United States: Max 2-3 stories with clear INTERNATIONAL impact (e.g. policy affecting other nations, global market moves, major military actions). Domestic-only stories (court rulings, agency relocations, domestic culture wars) go to "Also Notable" bullets instead. This digest is for non-US readers.
+[This is ALWAYS the first content section. Include all major geopolitical stories here: wars, conflicts (including the Ukraine-Russia war and any Middle East conflicts), diplomacy, international relations, NATO, UN, EU politics. Use bold **sub-headers** within this section to organise by topic (e.g. **Iran War**, **Ukraine-Russia**, **NATO**, **EU**). Do NOT create separate country-level sections for conflict coverage — conflicts belong here in Global Politics.]
 
 ---
 
-[Category sections — use h2 headers with emoji: 🤖 Technology and AI, 🌍 Climate and Environment, 🏛️ Global Politics, 🔬 Science and Research, 💼 Business and Economy, 🏥 Health and Medicine. Only include categories that have stories.]
+[Country sections — use flag emoji + country name as h2 headers. These are for DOMESTIC stories about these countries, not conflict coverage which goes in Global Politics above.]
+
+ALWAYS include: 🇵🇱 Poland, 🇨🇾 Cyprus, 🇳🇵 Nepal — these are the reader's home countries, always present even on quiet days.
+
+For other countries (CN, DE, FR, IT, ES, GB, US, EU): ONLY include if they have significant standalone DOMESTIC stories. Do NOT include empty filler sections.
+
+🇺🇸 United States: Max 2-3 stories with clear INTERNATIONAL impact. Domestic-only stories → "Also Notable" bullets. This digest is for non-US readers.
+
+---
+
+[Category sections — use h2 headers with emoji. Only include categories that have stories:]
+- 🤖 Technology and AI
+- 🌍 Climate and Environment
+- 🔬 Science and Research
+- 💼 Business and Economy
+- 🏥 Health and Medicine
 
 ---
 
 ## 🌏 Global South & Regional Roundup
 
-Pick 3-4 notable stories from the Global South (Africa, Latin America, Caribbean, Central Asia, South/Southeast Asia). Only include regions that have actual stories — skip regions with nothing. Use correct geography: Haiti = Caribbean/Latin America (NOT Africa), Pakistan = South Asia, etc. These should be stories told from local perspectives — not just Western coverage of those regions.
+Pick 3-4 notable stories from the Global South. Use sub-headers for each region. Only include regions with actual stories. Use correct geography: Haiti = Caribbean/Latin America (NOT Africa), Pakistan = South Asia, India = South Asia, China/Japan = East Asia (NOT Global South). These should be stories told from local perspectives.
 
 ---
 
 ## 📌 Also Notable
 
-[Brief bullet points of other significant stories that don't fit above, including US domestic stories]
+[Brief bullet points of other significant stories, including US domestic stories]
 
 ---
 
 ## 📰 Editorial Picks
 
-[Select 2-3 of the best editorial/investigative articles from sources marked "editorial": true (Bellingcat, The Conversation, The Intercept, Global Voices, Carbon Brief, The Markup, OCCRP, IPS News, Mongabay, ProPublica). For each: write 1-2 sentences summarising the core argument, then link the source. Keep it brief — the reader can click through.]
+[Select 2-3 of the best editorial/investigative articles from sources marked "editorial": true (Bellingcat, The Conversation, The Intercept, Global Voices, Carbon Brief, The Markup, OCCRP, IPS News, Mongabay, ProPublica). For each: write 2-3 sentences summarising the core argument and why it matters, then cite the source with link. The reader should understand what the piece argues without clicking through.]
 
 ---
 
@@ -146,13 +157,22 @@ Pick 3-4 notable stories from the Global South (Africa, Latin America, Caribbean
 ## GUIDELINES
 - Target approximately 2,500-3,000 words for the entire digest
 - Each story: 3-6 sentences, comprehensive enough that the reader never needs to click through
-- FORMATTING: Each story MUST be its own paragraph, separated by a blank line from the previous story. Never put multiple stories in the same paragraph
+- CRITICAL FORMATTING: Each story MUST start with a **bold headline** on its own line, followed by a blank line, then the story text. Stories MUST be separated by a blank line. Example:
+
+**Story Headline Here**
+
+The story text goes here, 3-6 sentences with source citations. ([Source](url))
+
+**Next Story Headline**
+
+Next story text here. ([Source](url))
+
 - Always cite sources as clickable markdown links: ([Source Name](url))
 - When the same story appears in multiple outlets, note that and link multiple sources
 - When stories are flagged as "conflicting", describe how different sources framed it differently
 - Focus on what matters to someone in Cyprus with ties to Poland
 - Stories about the same event should be consolidated, not repeated across sections
-- Include soccer/football, space, photography news only when truly significant
+- Do NOT include sports/football results unless they directly involve Poland, Cyprus, or Nepal
 - Do NOT use markdown blockquote syntax (lines starting with >)
 
 === TRIAGED STORIES ===
@@ -174,7 +194,7 @@ export function buildEmailBriefingPrompt(fullDigest: string, websiteUrl: string)
 - Keep the title, date line, and compiled-from note exactly as they are
 - Keep the weather tables and markets table exactly as they are (copy verbatim)
 - REMOVE the "Also Notable" section — replace with: "**[See all stories on the website →](${websiteUrl})**"
-- REMOVE the "Editorial Picks" details — replace with: "**[Read today's editorial picks →](${websiteUrl})**" and just list the titles
+- For "Editorial Picks": keep the 2-3 sentence summaries from the full digest (do NOT shorten these further). Add a link after each: [Read more →](${websiteUrl})
 - Each story MUST be its own paragraph, separated by a blank line
 - Add at the very top (before the title): *[Read the full digest online →](${websiteUrl})*
 - Target: 1,000-1,500 words maximum

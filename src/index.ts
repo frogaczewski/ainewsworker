@@ -214,7 +214,7 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   // Test mode: send only English email to Filip, skip Polish
   if (opts.testMode) {
     console.log('[Pipeline] Test mode — sending email only to Filip...');
-    await sendDigestEmail(env, emailBriefing, feedResult.feedStatuses);
+    await sendDigestEmail(env, emailBriefing);
     console.log('[Pipeline] Test mode complete');
     return 'test-success';
   }
@@ -250,18 +250,18 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   });
 
   const emailTasks: Promise<void>[] = [
-    sendDigestEmail(env, emailBriefing, feedResult.feedStatuses).catch(async () => {
+    sendDigestEmail(env, emailBriefing).catch(async () => {
       console.log('[Pipeline] English email failed, retrying once...');
-      await sendDigestEmail(env, emailBriefing, feedResult.feedStatuses);
+      await sendDigestEmail(env, emailBriefing);
     }),
   ];
 
   if (polishBriefing) {
     for (const plRecipient of EMAIL_TO_PL) {
       emailTasks.push(
-        sendDigestEmail(env, polishBriefing, feedResult.feedStatuses, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`).catch(async () => {
+        sendDigestEmail(env, polishBriefing, undefined, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`).catch(async () => {
           console.log(`[Pipeline] Polish email to ${plRecipient.email} failed, retrying once...`);
-          await sendDigestEmail(env, polishBriefing, feedResult.feedStatuses, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`);
+          await sendDigestEmail(env, polishBriefing, undefined, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`);
         }),
       );
     }
