@@ -5,8 +5,37 @@ import { callHaiku, callSonnet } from './llm';
 import { buildTriagePrompt, buildCompilationPrompt, buildEmailBriefingPrompt, buildTranslationPrompt } from './prompts';
 import { sendDigestEmail, sendErrorEmail } from './email';
 import { EMAIL_TO_PL } from './config';
-import { buildLandingPage, buildStoryPage } from './landing';
+import { buildLandingPage, buildStoryPage, generateSlug } from './landing';
 import type { Env, TriagedStory, FeedStatus, DigestData } from './types';
+
+/**
+ * Replace generic website links in the email briefing with proper /story/{date}/{slug} links.
+ * Finds each "Read ... →" link pointing to the base websiteUrl, looks at the nearest
+ * preceding h2/h3 header, generates a slug from it, and rewrites the link.
+ */
+function rewriteStoryLinks(markdown: string, websiteUrl: string, date: string): string {
+  const lines = markdown.split('\n');
+  let lastHeaderSlug = '';
+  const baseUrl = websiteUrl.replace(/\/$/, '');
+
+  for (let i = 0; i < lines.length; i++) {
+    // Track the most recent h2/h3 header
+    const headerMatch = lines[i].match(/^#{2,3}\s+(.+)/);
+    if (headerMatch) {
+      lastHeaderSlug = generateSlug(headerMatch[1]);
+    }
+
+    // Replace generic links with story-specific links
+    if (lastHeaderSlug && lines[i].includes(`](${websiteUrl})`) || lines[i].includes(`](${baseUrl})`)) {
+      const storyUrl = `${baseUrl}/story/${date}/${lastHeaderSlug}`;
+      lines[i] = lines[i]
+        .replace(`](${websiteUrl})`, `](${storyUrl})`)
+        .replace(`](${baseUrl})`, `](${storyUrl})`);
+    }
+  }
+
+  return lines.join('\n');
+}
 
 interface PipelineOptions {
   dryRun?: boolean;  // skip compilation, translation, and emails — just populate KV
@@ -147,6 +176,10 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   }
 
   console.log(`[Pipeline] Email briefing compiled (${emailBriefing.length} characters)`);
+
+  // Post-process: replace generic website links with proper /story/{date}/{slug} links
+  const todayDate = new Date().toISOString().slice(0, 10);
+  emailBriefing = rewriteStoryLinks(emailBriefing, websiteUrl, todayDate);
 
   // Save everything to KV — full digest + email briefing
   try {
