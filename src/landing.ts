@@ -138,18 +138,6 @@ const FALLBACK_TICKER = `
   <span class="ticker-item"><span class="label">USD/PLN</span> <span class="val down">3.97</span></span>
 `;
 
-// ── Source list ──
-
-const SOURCES = [
-  'BBC', 'The Guardian', 'Al Jazeera', 'France 24', 'DW', 'NPR',
-  'Politico EU', 'Der Spiegel', 'El País', 'Nikkei Asia', 'SCMP',
-  'Straits Times', 'Times of India', 'TechCrunch', 'The Verge', 'Wired',
-  'Nature', 'Science Daily', 'Xinhua', 'TASS', 'Meduza', 'Moscow Times',
-  'Cyprus Mail', 'Gazeta Wyborcza', 'Rzeczpospolita', 'Notes From Poland',
-  'ProPublica', 'Democracy Now', 'Rest of World', 'ABC Australia',
-  'Globe and Mail', 'The Hindu', 'Al Arabiya',
-];
-
 // ── Shared page styles ──
 
 const PAGE_STYLES = `<style>
@@ -159,83 +147,127 @@ const PAGE_STYLES = `<style>
     --muted: #8a7e6b; --accent: #8b2500; --heading: #3d2b1f;
     --table-header: #D4835E; --table-header-text: #FAF6F0; --table-even: #F0EBE3;
   }
-  body { font-family: 'EB Garamond', 'Georgia', 'Times New Roman', serif; line-height: 1.65; color: var(--ink); background: var(--paper); }
+  body { font-family: 'EB Garamond', 'Georgia', 'Times New Roman', serif; line-height: 1.7; color: var(--ink); background: var(--paper); }
 
-  .ticker { background: var(--ink); color: #d4c9b8; font-size: 13px; letter-spacing: 0.3px; padding: 6px 0; overflow: hidden; }
-  .ticker-inner { max-width: 1200px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
-  .ticker-label { font-weight: 700; color: #f5f3ee; text-transform: uppercase; font-size: 10px; letter-spacing: 1.5px; white-space: nowrap; }
-  .ticker-items { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
-  .ticker-item { white-space: nowrap; } .ticker-item .label { color: #8a7e6b; } .ticker-item .val { color: #f5f3ee; font-weight: 600; }
-  .ticker-item .up { color: #5a9a5a; } .ticker-item .down { color: #c05050; } .ticker-sep { color: #555; }
+  /* ── Ticker ── */
+  .ticker { background: var(--ink); color: #d4c9b8; font-size: 12px; letter-spacing: 0.3px; padding: 5px 0; overflow: hidden; }
+  .ticker-inner { max-width: 1100px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .ticker-label { font-weight: 700; color: #f5f3ee; text-transform: uppercase; font-size: 9px; letter-spacing: 1.5px; white-space: nowrap; }
+  .ticker-items { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .ticker-item { white-space: nowrap; }
+  .ticker-item .label { color: #8a7e6b; }
+  .ticker-item .val { color: #f5f3ee; font-weight: 600; }
+  .ticker-item .up { color: #5a9a5a; }
+  .ticker-item .down { color: #c05050; }
+  .ticker-sep { color: #444; margin: 0 1px; }
 
-  .header { max-width: 1200px; margin: 0 auto; padding: 20px 24px 0; }
-  .header-rule { border: none; border-top: 3px solid var(--ink); }
+  /* ── Header ── */
+  .header { max-width: 800px; margin: 0 auto; padding: 24px 24px 0; }
+  .header-rule { border: none; border-top: 3px double var(--ink); }
   .header-rule-thin { border: none; border-top: 1px solid var(--ink); margin-top: 6px; }
-  .header-main { display: flex; align-items: baseline; justify-content: space-between; padding: 10px 0 4px; flex-wrap: wrap; gap: 8px; }
-  .header h1 { font-size: 40px; font-weight: 800; color: var(--accent); line-height: 1; letter-spacing: -0.5px; }
-  .header h1 a { color: var(--accent); text-decoration: none; }
+  .header-main { display: flex; align-items: baseline; justify-content: space-between; padding: 12px 0 6px; flex-wrap: wrap; gap: 8px; }
+  .header h1 { font-size: 36px; font-weight: 800; color: var(--ink); line-height: 1; letter-spacing: -0.5px; }
+  .header h1 a { color: var(--ink); text-decoration: none; }
   .header-date { font-size: 15px; color: var(--muted); font-style: italic; }
+  .header-tagline { font-size: 13px; color: var(--muted); padding: 6px 0 0; letter-spacing: 0.3px; }
 
-  .sources-strip { max-width: 1200px; margin: 0 auto; padding: 10px 24px; border-bottom: 1px solid var(--rule); }
-  .sources-strip-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
-  .sources-wrap { display: flex; flex-wrap: wrap; gap: 3px 8px; }
-  .src-tag { font-size: 11px; color: var(--muted); white-space: nowrap; }
-  .src-tag::after { content: ' ·'; color: var(--rule); } .src-tag:last-child::after { content: ''; }
+  /* ── Layout ── */
+  .layout { max-width: 800px; margin: 0 auto; padding: 32px 24px 48px; }
 
-  .layout { max-width: 1200px; margin: 0 auto; padding: 24px 24px 60px; display: grid; grid-template-columns: 1fr 300px; gap: 32px; align-items: start; }
-  .digest-area { min-width: 0; }
-  .digest-label { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: var(--accent); font-weight: 700; border-bottom: 2px solid var(--accent); padding-bottom: 6px; margin-bottom: 20px; }
-  .digest-label a { color: var(--accent); text-decoration: none; }
-  .sample-note { background: var(--cream); border-left: 3px solid var(--accent); padding: 10px 16px; font-size: 14px; color: var(--muted); font-style: italic; margin-bottom: 20px; }
+  .sample-note { background: var(--cream); border-left: 3px solid var(--accent); padding: 10px 16px; font-size: 14px; color: var(--muted); font-style: italic; margin-bottom: 24px; }
+  .back-link { display: inline-block; font-size: 14px; color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--rule); margin-bottom: 24px; }
+  .back-link:hover { border-bottom-color: var(--accent); }
 
-  .digest-content { max-width: 750px; }
+  /* ── Digest content ── */
   .digest-content h1 { display: none; }
-  .digest-content h2 { font-size: 24px; font-weight: 700; color: var(--accent); margin: 36px 0 16px; padding: 8px 0 8px 14px; border-bottom: none; border-left: 4px solid var(--accent); background: var(--cream); }
+
+  .digest-content h2 {
+    font-size: 22px; font-weight: 700; color: var(--accent);
+    margin: 48px 0 20px; padding: 10px 0 10px 16px;
+    border-left: 4px solid var(--accent); background: var(--cream);
+    letter-spacing: -0.2px;
+  }
   .digest-content h2:first-child { margin-top: 0; }
   .digest-content h2 a { color: var(--accent); text-decoration: none; border-bottom: none; }
   .digest-content h2 a:hover { text-decoration: underline; }
-  .digest-content h3 { font-size: 18px; font-weight: 700; color: var(--heading); margin: 24px 0 10px; }
-  .digest-content p { font-size: 16px; color: var(--ink); margin: 10px 0 14px; line-height: 1.75; }
+
+  .digest-content h3 { font-size: 18px; font-weight: 700; color: var(--heading); margin: 28px 0 12px; }
+
+  .digest-content p {
+    font-size: 17px; color: var(--ink); line-height: 1.8; margin: 0 0 18px;
+  }
+
   .digest-content strong { color: var(--ink); }
-  .digest-content em { color: var(--muted); font-size: 15px; }
-  .digest-content p strong:first-child { display: block; font-size: 17px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--rule); }
-  .digest-content h2 + p strong:first-child, .digest-content hr + p strong:first-child { border-top: none; margin-top: 8px; padding-top: 0; }
-  .digest-content hr { border: none; border-top: 2px solid var(--rule); margin: 32px 0; }
-  .digest-content a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--rule); }
+  .digest-content em { color: var(--muted); }
+
+  /* Story headlines — the bold lead of each story */
+  .digest-content p strong:first-child {
+    display: block; font-size: 18px; line-height: 1.4;
+    margin-top: 28px; padding-top: 20px;
+    border-top: 1px solid var(--rule);
+  }
+  .digest-content h2 + p strong:first-child,
+  .digest-content hr + p strong:first-child {
+    border-top: none; margin-top: 0; padding-top: 0;
+  }
+
+  .digest-content hr { border: none; border-top: 1px solid var(--rule); margin: 40px 0; }
+
+  .digest-content a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; }
   .digest-content a:hover { border-bottom-color: var(--accent); }
-  .digest-content ul { padding-left: 20px; margin: 12px 0; }
-  .digest-content li { margin: 8px 0; font-size: 16px; line-height: 1.65; }
-  .digest-content table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 15px; }
+
+  .digest-content ul { padding-left: 24px; margin: 12px 0 18px; }
+  .digest-content li { margin: 8px 0; font-size: 17px; line-height: 1.7; }
+
+  .digest-content table { border-collapse: collapse; width: 100%; margin: 20px 0; font-size: 15px; }
   .digest-content th, .digest-content thead tr th { background: var(--table-header); color: var(--table-header-text); padding: 10px 14px; text-align: left; font-weight: 600; }
   .digest-content td { padding: 8px 14px; border-bottom: 1px solid var(--rule); }
   .digest-content tr:nth-child(even) { background: var(--table-even); }
-  .digest-content blockquote { border-left: 4px solid var(--accent); margin: 12px 0; padding: 8px 16px; background: var(--cream); color: var(--heading); }
+  .digest-content blockquote { border-left: 4px solid var(--accent); margin: 16px 0; padding: 10px 20px; background: var(--cream); color: var(--heading); font-style: italic; }
 
-  .sidebar { position: sticky; top: 24px; }
-  .subscribe-box { background: var(--cream); border: 1px solid var(--rule); padding: 28px 24px; }
-  .subscribe-box h2 { font-size: 22px; font-weight: 800; color: var(--heading); line-height: 1.25; margin-bottom: 12px; }
-  .subscribe-box p { font-size: 15px; color: #4a4a4a; margin-bottom: 16px; }
-  .subscribe-box ul { list-style: none; padding: 0; margin: 0 0 20px; }
-  .subscribe-box ul li { font-size: 14px; color: var(--ink); padding: 5px 0; border-bottom: 1px solid var(--rule); }
-  .subscribe-box ul li:last-child { border-bottom: none; } .subscribe-box ul li strong { color: var(--accent); }
-  .signup-form { display: flex; flex-direction: column; gap: 8px; }
-  .signup-form input[type="email"] { width: 100%; padding: 10px 12px; border: 1px solid var(--rule); font-size: 15px; font-family: inherit; color: var(--ink); background: white; }
-  .signup-form input[type="email"]:focus { outline: none; border-color: var(--accent); }
-  .signup-form button { padding: 10px 20px; background: var(--accent); color: white; border: none; font-size: 15px; font-weight: 700; font-family: inherit; cursor: pointer; letter-spacing: 0.5px; transition: background 0.2s; }
-  .signup-form button:hover { background: #6d1d00; }
-  .signup-note { font-size: 12px; color: var(--muted); font-style: italic; margin-top: 6px; }
-  .sidebar-extra { margin-top: 24px; padding: 20px 24px; border: 1px solid var(--rule); background: white; }
-  .sidebar-extra h3 { font-size: 14px; font-weight: 700; color: var(--heading); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
-  .sidebar-extra p { font-size: 14px; color: #4a4a4a; line-height: 1.5; }
+  /* ── Subscribe banner ── */
+  .subscribe-banner {
+    background: var(--cream); border-top: 2px solid var(--rule); border-bottom: 2px solid var(--rule);
+    padding: 36px 24px;
+  }
+  .subscribe-inner {
+    max-width: 800px; margin: 0 auto;
+    display: flex; align-items: center; gap: 32px; flex-wrap: wrap;
+  }
+  .subscribe-text { flex: 1; min-width: 240px; }
+  .subscribe-text h2 { font-size: 24px; font-weight: 800; color: var(--heading); margin-bottom: 6px; }
+  .subscribe-text p { font-size: 15px; color: var(--muted); line-height: 1.5; }
+  .subscribe-form {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  }
+  .subscribe-form input[type="email"] {
+    padding: 10px 14px; border: 1px solid var(--rule); font-size: 15px;
+    font-family: inherit; color: var(--ink); background: white; width: 240px;
+  }
+  .subscribe-form input[type="email"]:focus { outline: none; border-color: var(--accent); }
+  .subscribe-form button {
+    padding: 10px 24px; background: var(--accent); color: white; border: none;
+    font-size: 15px; font-weight: 700; font-family: inherit; cursor: pointer;
+    letter-spacing: 0.3px; transition: background 0.2s;
+  }
+  .subscribe-form button:hover { background: #6d1d00; }
 
-  .footer { max-width: 1200px; margin: 0 auto; padding: 20px 24px; border-top: 2px solid var(--ink); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  /* ── Footer ── */
+  .footer {
+    max-width: 800px; margin: 0 auto; padding: 20px 24px;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  }
   .footer p { font-size: 13px; color: var(--muted); }
 
-  @media (max-width: 860px) {
-    .layout { grid-template-columns: 1fr; }
-    .sidebar { position: static; order: -1; }
-    .header h1 { font-size: 30px; }
-    .ticker-inner { font-size: 12px; }
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    .header h1 { font-size: 28px; }
+    .header-main { flex-direction: column; gap: 4px; }
+    .subscribe-inner { flex-direction: column; text-align: center; }
+    .subscribe-form { justify-content: center; width: 100%; }
+    .subscribe-form input[type="email"] { width: 100%; }
+    .digest-content p { font-size: 16px; }
+    .digest-content p strong:first-child { font-size: 17px; }
   }
 </style>`;
 
@@ -248,7 +280,7 @@ function pageHead(title: string): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)}</title>
-  <meta name="description" content="AI News Digest — daily world news from 38+ international sources.">
+  <meta name="description" content="AI News Digest — daily world news from 38+ international sources, compiled by AI.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
@@ -256,9 +288,9 @@ function pageHead(title: string): string {
 </head>`;
 }
 
-function pageHeader(dateStr: string, sourceTags: string, tickerContent: string): string {
+function pageHeader(dateStr: string, tickerContent: string): string {
   return `
-  <div class="ticker"><div class="ticker-inner"><span class="ticker-label">Live Data</span><div class="ticker-items">${tickerContent}</div></div></div>
+  <div class="ticker"><div class="ticker-inner"><span class="ticker-label">Live</span><div class="ticker-items">${tickerContent}</div></div></div>
   <header class="header">
     <hr class="header-rule">
     <div class="header-main">
@@ -266,43 +298,31 @@ function pageHeader(dateStr: string, sourceTags: string, tickerContent: string):
       <span class="header-date">${dateStr}</span>
     </div>
     <hr class="header-rule-thin">
-  </header>
-  <div class="sources-strip">
-    <div class="sources-strip-label">Compiled from 38+ sources</div>
-    <div class="sources-wrap">${sourceTags}</div>
-  </div>`;
+    <p class="header-tagline">Daily world news from 38+ sources, compiled by AI</p>
+  </header>`;
 }
 
-function pageSidebar(): string {
+function subscribeBanner(): string {
   return `
-    <aside class="sidebar">
-      <div class="subscribe-box">
-        <h2>Get the digest in&nbsp;your inbox</h2>
-        <p>The world's news from 38+ sources, distilled by AI into one concise briefing.</p>
-        <ul>
-          <li><strong>38+</strong> international sources daily</li>
-          <li><strong>AI-compiled</strong> — no noise, just signal</li>
-          <li><strong>Your regions</strong> — Poland, Cyprus &amp; more</li>
-          <li><strong>6 AM</strong> — every morning, on time</li>
-        </ul>
-        <form class="signup-form" onsubmit="return false;">
-          <input type="email" placeholder="your@email.com" aria-label="Email address" required>
-          <button type="submit">Subscribe — it's free</button>
-        </form>
-        <p class="signup-note">One email per day. Unsubscribe anytime.</p>
+  <div class="subscribe-banner">
+    <div class="subscribe-inner">
+      <div class="subscribe-text">
+        <h2>Get the digest in your inbox</h2>
+        <p>38+ international sources, distilled into one concise briefing every morning.</p>
       </div>
-      <div class="sidebar-extra">
-        <h3>How it works</h3>
-        <p>Every day at 3 AM UTC, we fetch hundreds of articles from RSS feeds worldwide. AI triages them for relevance, removes duplicates, and compiles a single digest covering politics, tech, science, markets, and weather — delivered by 6 AM.</p>
-      </div>
-    </aside>`;
+      <form class="subscribe-form" onsubmit="return false;">
+        <input type="email" placeholder="your@email.com" aria-label="Email address" required>
+        <button type="submit">Subscribe</button>
+      </form>
+    </div>
+  </div>`;
 }
 
 function pageFooter(): string {
   return `
   <footer class="footer">
-    <p>AI News Digest — compiled daily from 38+ international sources by Claude</p>
-    <p>Built on Cloudflare Workers</p>
+    <p>Compiled daily by Claude on Cloudflare Workers</p>
+    <p>&copy; AI News Digest</p>
   </footer>
 </body>
 </html>`;
@@ -346,19 +366,14 @@ export function buildLandingPage(data?: DigestData | null): string {
     ? ''
     : '<div class="sample-note">Preview with sample articles — subscribe to receive the real daily digest every morning.</div>';
 
-  const sourceTags = SOURCES.map(s => `<span class="src-tag">${s}</span>`).join('');
-
   return `${pageHead('AI News Digest — Daily World News from 38+ Sources')}
 <body>
-  ${pageHeader(dateStr, sourceTags, tickerContent)}
+  ${pageHeader(dateStr, tickerContent)}
   <div class="layout">
-    <div class="digest-area">
-      <div class="digest-label">Today's Digest</div>
-      ${sampleNote}
-      <div class="digest-content">${digestHtml}</div>
-    </div>
-    ${pageSidebar()}
+    ${sampleNote}
+    <div class="digest-content">${digestHtml}</div>
   </div>
+  ${subscribeBanner()}
   ${pageFooter()}`;
 }
 
@@ -378,17 +393,14 @@ export function buildStoryPage(data: DigestData, slug: string): string {
   });
 
   const tickerContent = renderTickerItems(data.weather, data.markets, data.feedStats);
-  const sourceTags = SOURCES.map(s => `<span class="src-tag">${s}</span>`).join('');
 
   return `${pageHead('AI News Digest — ' + escapeHtml(slug.replace(/-/g, ' ')))}
 <body>
-  ${pageHeader(dateStr, sourceTags, tickerContent)}
+  ${pageHeader(dateStr, tickerContent)}
   <div class="layout">
-    <div class="digest-area">
-      <div class="digest-label"><a href="/">← Back to full digest</a></div>
-      <div class="digest-content">${sectionHtml}</div>
-    </div>
-    ${pageSidebar()}
+    <a href="/" class="back-link">&larr; Back to full digest</a>
+    <div class="digest-content">${sectionHtml}</div>
   </div>
+  ${subscribeBanner()}
   ${pageFooter()}`;
 }
