@@ -718,18 +718,30 @@ function pageFooter(): string {
 
 // ── Render a section block ──
 
+/** Look up image URL by article URL, trying exact match first, then base URL without query params */
+function findImage(articleUrl: string, storyImages: Record<string, string>): string | undefined {
+  // Exact match
+  if (storyImages[articleUrl]) return storyImages[articleUrl];
+  // Try without query params (Sonnet often strips tracking params like ?at_medium=RSS)
+  const baseUrl = articleUrl.split('?')[0];
+  if (storyImages[baseUrl]) return storyImages[baseUrl];
+  // Try matching by path (handles minor domain differences)
+  for (const key of Object.keys(storyImages)) {
+    if (key.split('?')[0] === baseUrl) return storyImages[key];
+  }
+  return undefined;
+}
+
 /** Inject thumbnail images into section HTML by matching article URLs against storyImages map */
 function injectThumbnails(html: string, storyImages: Record<string, string>): string {
   if (!storyImages || Object.keys(storyImages).length === 0) return html;
 
-  // Split HTML into paragraphs, find ones with article links that have images
-  // Each story paragraph looks like: <p><strong>Headline</strong> — text... (<a href="url">Source</a>)</p>
+  // Each story paragraph: <p><strong>Headline</strong> — text... (<a href="url">Source</a>)</p>
   return html.replace(/<p>(\s*<strong>[\s\S]*?<\/p>)/g, (fullMatch, inner) => {
     // Find article URLs in this paragraph
     const linkMatches = [...inner.matchAll(/<a\s+href="([^"]+)"/g)];
     for (const m of linkMatches) {
-      const articleUrl = m[1];
-      const imageUrl = storyImages[articleUrl];
+      const imageUrl = findImage(m[1], storyImages);
       if (imageUrl) {
         const imgTag = `<img src="${escapeHtml(imageUrl)}" class="story-thumb" loading="lazy" alt="" onerror="this.style.display='none'">`;
         return `<p>${imgTag}${inner}`;

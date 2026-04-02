@@ -129,10 +129,13 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   }
 
   // Build story images map for the landing page
+  // Key by base URL (no query params) since Sonnet often strips tracking params
   const storyImages: Record<string, string> = {};
   for (const story of triagedStories) {
     if (story.imageUrl && story.link) {
-      storyImages[story.link] = story.imageUrl;
+      const baseUrl = story.link.split('?')[0];
+      storyImages[baseUrl] = story.imageUrl;
+      if (baseUrl !== story.link) storyImages[story.link] = story.imageUrl;
     }
   }
   const imageCount = Object.keys(storyImages).length;

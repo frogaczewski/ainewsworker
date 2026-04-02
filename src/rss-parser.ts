@@ -40,21 +40,26 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+/** Decode XML entities in URLs (e.g. &amp; → &) */
+function decodeXmlEntities(url: string): string {
+  return url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+}
+
 /** Extract image URL from an RSS item using multiple fallback sources */
 function extractImageUrl(itemXml: string): string {
   // 1. media:content url attribute (most common for news feeds)
   const mediaContent = extractAttr(itemXml, 'media:content', 'url');
-  if (mediaContent && looksLikeImageUrl(mediaContent)) return mediaContent;
+  if (mediaContent && looksLikeImageUrl(mediaContent)) return decodeXmlEntities(mediaContent);
 
   // 2. media:thumbnail url attribute
   const mediaThumbnail = extractAttr(itemXml, 'media:thumbnail', 'url');
-  if (mediaThumbnail) return mediaThumbnail;
+  if (mediaThumbnail) return decodeXmlEntities(mediaThumbnail);
 
   // 3. enclosure with image type
   const enclosureType = extractAttr(itemXml, 'enclosure', 'type');
   if (enclosureType && enclosureType.startsWith('image/')) {
     const enclosureUrl = extractAttr(itemXml, 'enclosure', 'url');
-    if (enclosureUrl) return enclosureUrl;
+    if (enclosureUrl) return decodeXmlEntities(enclosureUrl);
   }
 
   // 4. First <img> in description/content (some feeds embed HTML)
