@@ -65,7 +65,8 @@ function splitDigestSections(markdown: string): DigestSection[] {
     }
 
     const fullTitle = headerMatch[2].trim();
-    const emojiMatch = fullTitle.match(/^(\p{Emoji_Presentation}|\p{Emoji}\uFE0F?(?:\u200D\p{Emoji}\uFE0F?)*)\s*/u);
+    // Match common emoji patterns: flag pairs (🇵🇱), presentation emojis (🏛️), ZWJ sequences
+    const emojiMatch = fullTitle.match(/^([\u{1F1E0}-\u{1F1FF}]{2}|[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}]+)\s*/u);
     const emoji = emojiMatch ? emojiMatch[1] : '';
     const title = emoji ? fullTitle.slice(emojiMatch![0].length).trim() : fullTitle;
     const slug = generateSlug(fullTitle);
