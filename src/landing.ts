@@ -1,23 +1,8 @@
 // Landing page HTML template for AI News Digest
+// CNN/Economist-inspired redesign: red + white, sans-serif, full-width card grid
 
-import type { DigestData, TriagedStory, WeatherData, MarketData } from './types';
-
-// ── Display maps ──
-
-const CATEGORY_DISPLAY: Record<string, { label: string; emoji: string; order: number }> = {
-  politics: { label: 'Global Politics', emoji: '🏛', order: 1 },
-  tech_ai:  { label: 'Tech & AI',      emoji: '🤖', order: 2 },
-  science:  { label: 'Science',         emoji: '🔬', order: 3 },
-  business: { label: 'Business & Markets', emoji: '💼', order: 4 },
-  climate:  { label: 'Climate & Environment', emoji: '🌍', order: 5 },
-  health:   { label: 'Health',          emoji: '🏥', order: 6 },
-};
-
-const COUNTRY_DISPLAY: Record<string, { label: string; emoji: string; order: number }> = {
-  PL: { label: 'Poland',  emoji: '🇵🇱', order: 10 },
-  CY: { label: 'Cyprus',  emoji: '🇨🇾', order: 11 },
-  NP: { label: 'Nepal',   emoji: '🇳🇵', order: 12 },
-};
+import { markdownToHtml } from './email';
+import type { DigestData, WeatherData, MarketData } from './types';
 
 // ── Helpers ──
 
@@ -25,56 +10,90 @@ function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// ── Section grouping ──
-
-interface LandingSection {
-  key: string;
-  label: string;
-  emoji: string;
-  order: number;
-  stories: { headline: string; summary: string; source: string; link: string }[];
+export function generateSlug(text: string): string {
+  return text.toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 60)
+    .replace(/-$/, '');
 }
 
-function groupStoriesIntoSections(stories: TriagedStory[]): LandingSection[] {
-  const unique = stories.filter(s => s.duplicate_of === null);
-  const sections = new Map<string, LandingSection>();
+// ── Section splitting ──
 
-  for (const story of unique) {
-    // Country-specific sections first
-    let assigned = false;
-    for (const tag of story.country_tags) {
-      const country = COUNTRY_DISPLAY[tag];
-      if (country) {
-        if (!sections.has(tag)) {
-          sections.set(tag, { key: tag, label: country.label, emoji: country.emoji, order: country.order, stories: [] });
-        }
-        sections.get(tag)!.stories.push({
-          headline: story.headline,
-          summary: story.summary,
-          source: story.source,
-          link: story.link,
-        });
-        assigned = true;
+interface DigestSection {
+  slug: string;
+  emoji: string;
+  title: string;
+  html: string;
+}
+
+/** Split digest markdown into individual sections by --- separators and ## headers */
+function splitDigestSections(markdown: string): DigestSection[] {
+  const sections: DigestSection[] = [];
+  const chunks = markdown.split(/\n---\n/);
+
+  for (const chunk of chunks) {
+    const trimmed = chunk.trim();
+    if (!trimmed) continue;
+
+    // Find the first ## or ### header
+    const headerMatch = trimmed.match(/^(#{2,3})\s+(.+)$/m);
+    if (!headerMatch) {
+      // No header found — skip (e.g. the title line "# Daily News Digest...")
+      // But if it has substantial content, wrap it
+      if (trimmed.length > 100 && !trimmed.startsWith('# ')) {
+        sections.push({ slug: 'intro', emoji: '', title: 'Overview', html: markdownToHtml(trimmed) });
+      }
+      continue;
+    }
+
+    const fullTitle = headerMatch[2].trim();
+    // Extract emoji (first char or two if it's an emoji)
+    const emojiMatch = fullTitle.match(/^(\p{Emoji_Presentation}|\p{Emoji}\uFE0F?(?:\u200D\p{Emoji}\uFE0F?)*)\s*/u);
+    const emoji = emojiMatch ? emojiMatch[1] : '';
+    const title = emoji ? fullTitle.slice(emojiMatch![0].length).trim() : fullTitle;
+    const slug = generateSlug(fullTitle);
+
+    if (!slug) continue;
+
+    // Convert the chunk body (without the leading # title if present) to HTML
+    // Remove the first "# Title" line if it exists before the section
+    const body = trimmed.replace(/^#\s+.+\n*/m, '').trim();
+    const html = markdownToHtml(body);
+
+    sections.push({ slug, emoji, title, html });
+  }
+
+  return sections;
+}
+
+/** Extract a section from digest markdown by matching slug against h2/h3 headers */
+function extractSectionBySlug(markdown: string, slug: string): string | null {
+  const lines = markdown.split('\n');
+  let capturing = false;
+  const captured: string[] = [];
+  const headerLevel = /^(#{2,3})\s+/;
+
+  for (const line of lines) {
+    const match = line.match(headerLevel);
+    if (match) {
+      const headerText = line.replace(headerLevel, '').trim();
+      const headerSlug = generateSlug(headerText);
+      if (headerSlug === slug) {
+        capturing = true;
+        captured.push(line);
+        continue;
+      } else if (capturing) {
         break;
       }
     }
-    if (assigned) continue;
-
-    // Category sections
-    const catTag = story.category_tags[0] || 'politics';
-    const cat = CATEGORY_DISPLAY[catTag] || CATEGORY_DISPLAY.politics;
-    if (!sections.has(catTag)) {
-      sections.set(catTag, { key: catTag, label: cat.label, emoji: cat.emoji, order: cat.order, stories: [] });
+    if (capturing) {
+      captured.push(line);
     }
-    sections.get(catTag)!.stories.push({
-      headline: story.headline,
-      summary: story.summary,
-      source: story.source,
-      link: story.link,
-    });
   }
 
-  return Array.from(sections.values()).sort((a, b) => a.order - b.order);
+  return captured.length > 0 ? captured.join('\n').trim() : null;
 }
 
 // ── Ticker belt rendering ──
@@ -117,83 +136,51 @@ function renderTickerItems(weather: WeatherData[], markets: MarketData, feedStat
     }
   }
 
-  items.push(`<span class="ticker-item"><span class="label">Sources today</span> <span class="val">${feedStats.succeeded} / ${feedStats.total}</span></span>`);
+  items.push(`<span class="ticker-item"><span class="label">Sources</span> <span class="val">${feedStats.succeeded}/${feedStats.total}</span></span>`);
 
   return items.join(sep);
 }
 
-// ── News columns ──
+// ── Sample digest markdown (fallback when KV is empty) ──
 
-function renderNewsColumns(sections: LandingSection[]): string {
-  const mid = Math.ceil(sections.length / 2);
-  const left = sections.slice(0, mid);
-  const right = sections.slice(mid);
+const SAMPLE_DIGEST = `## 🏛️ Global Politics
 
-  const renderCol = (cols: LandingSection[]) =>
-    cols.map(section => `
-      <div class="section">
-        <h3 class="section-title"><span class="section-emoji">${section.emoji}</span> ${escapeHtml(section.label)}</h3>
-        ${section.stories.map(story => `
-        <article class="story">
-          <h4>${story.link ? `<a href="${escapeHtml(story.link)}" target="_blank" rel="noopener">${escapeHtml(story.headline)}</a>` : escapeHtml(story.headline)}</h4>
-          <p>${escapeHtml(story.summary)}</p>
-          <span class="meta">${escapeHtml(story.source)}</span>
-        </article>
-        `).join('')}
-      </div>
-    `).join('');
+**EU Leaders Reach Historic Agreement on Digital Infrastructure Investment** — European Union member states have agreed on a landmark €45 billion package aimed at modernising digital infrastructure across the bloc, with a focus on AI research hubs and cross-border connectivity. ([Politico EU](https://example.com))
 
-  return `
-    <div class="col">${renderCol(left)}</div>
-    <div class="col">${renderCol(right)}</div>
-  `;
-}
+**Southeast Asian Nations Form Joint Climate Resilience Task Force** — ASEAN countries announced a new cooperative framework to address rising sea levels and extreme weather events affecting the region's coastal communities. ([Straits Times](https://example.com))
 
-// ── Sample articles (fallback when KV is empty) ──
+---
 
-const SAMPLE_SECTIONS: LandingSection[] = [
-  {
-    key: 'politics', label: 'Global Politics', emoji: '🏛', order: 1,
-    stories: [
-      { headline: 'EU Leaders Reach Historic Agreement on Digital Infrastructure Investment', summary: 'European Union member states have agreed on a landmark €45 billion package aimed at modernising digital infrastructure across the bloc, with a focus on AI research hubs and cross-border connectivity.', source: 'Politico EU', link: '' },
-      { headline: 'Southeast Asian Nations Form Joint Climate Resilience Task Force', summary: 'ASEAN countries announced a new cooperative framework to address rising sea levels and extreme weather events affecting the region\'s coastal communities.', source: 'Straits Times', link: '' },
-      { headline: 'G7 Finance Ministers Agree on New Framework for Digital Currency Regulation', summary: 'The group of seven industrialised nations has outlined principles for governing central bank digital currencies, seeking common ground on cross-border payments and consumer protection standards.', source: 'BBC Business', link: '' },
-    ],
-  },
-  {
-    key: 'tech_ai', label: 'Tech & AI', emoji: '🤖', order: 2,
-    stories: [
-      { headline: 'Open-Source Language Model Achieves Breakthrough in Multilingual Understanding', summary: 'A consortium of European research labs has released a new open-source language model that sets new benchmarks in understanding and generating text across 47 languages.', source: 'TechCrunch', link: '' },
-      { headline: 'Wearable Health Sensors Now Capable of Real-Time Blood Sugar Monitoring', summary: 'A new generation of non-invasive wearable sensors promises continuous glucose monitoring without finger pricks, potentially transforming diabetes management worldwide.', source: 'Wired', link: '' },
-    ],
-  },
-  {
-    key: 'science', label: 'Science', emoji: '🔬', order: 3,
-    stories: [
-      { headline: 'Deep-Sea Expedition Discovers New Species in Pacific Trench', summary: 'Marine biologists have catalogued over 30 previously unknown species during a month-long expedition to the Kermadec Trench, including bioluminescent organisms at depths exceeding 8,000 metres.', source: 'Nature News', link: '' },
-      { headline: 'CERN Reports Anomalous Results in Latest Particle Collision Data', summary: 'Physicists at the Large Hadron Collider have identified unexpected deviations from the Standard Model in muon decay measurements, prompting calls for independent verification.', source: 'Science Daily', link: '' },
-    ],
-  },
-  {
-    key: 'business', label: 'Business & Markets', emoji: '💼', order: 4,
-    stories: [
-      { headline: 'Global Semiconductor Supply Chains Shift Toward Regional Hubs', summary: 'Major chipmakers are accelerating plans to build fabrication plants in Europe and Southeast Asia, reducing dependency on concentrated production centres amid growing geopolitical tensions.', source: 'Nikkei Asia', link: '' },
-    ],
-  },
-  {
-    key: 'PL', label: 'Poland', emoji: '🇵🇱', order: 10,
-    stories: [
-      { headline: 'Gdańsk Port Expansion Project Enters Final Phase', summary: 'The ambitious expansion of the Port of Gdańsk, set to make it one of the largest container terminals in the Baltic, has entered its final construction phase with completion expected by autumn.', source: 'Gazeta Wyborcza', link: '' },
-      { headline: 'Warsaw Metro Line 3 Receives EU Cohesion Fund Approval', summary: 'The European Commission has approved €1.2 billion in cohesion funding for the third metro line, which will connect the Praga district to the western suburbs by 2031.', source: 'Rzeczpospolita', link: '' },
-    ],
-  },
-  {
-    key: 'CY', label: 'Cyprus', emoji: '🇨🇾', order: 11,
-    stories: [
-      { headline: 'Cyprus Approves New Renewable Energy Targets for 2030', summary: 'The Cypriot parliament has approved an updated national energy plan targeting 35% renewable energy in the electricity mix by 2030, up from the previous goal of 26%.', source: 'Cyprus Mail', link: '' },
-    ],
-  },
-];
+## 🤖 Technology and AI
+
+**Open-Source Language Model Achieves Breakthrough in Multilingual Understanding** — A consortium of European research labs has released a new open-source language model that sets new benchmarks in understanding and generating text across 47 languages. ([TechCrunch](https://example.com))
+
+**Wearable Health Sensors Now Capable of Real-Time Blood Sugar Monitoring** — A new generation of non-invasive wearable sensors promises continuous glucose monitoring without finger pricks. ([Wired](https://example.com))
+
+---
+
+## 🇵🇱 Poland
+
+**Gdańsk Port Expansion Project Enters Final Phase** — The ambitious expansion of the Port of Gdańsk, set to make it one of the largest container terminals in the Baltic, has entered its final construction phase with completion expected by autumn. ([Gazeta Wyborcza](https://example.com))
+
+---
+
+## 🇨🇾 Cyprus
+
+**Cyprus Approves New Renewable Energy Targets for 2030** — The Cypriot parliament has approved an updated national energy plan targeting 35% renewable energy in the electricity mix by 2030, up from the previous goal of 26%. ([Cyprus Mail](https://example.com))
+
+---
+
+## 🔬 Science and Research
+
+**Deep-Sea Expedition Discovers New Species in Pacific Trench** — Marine biologists have catalogued over 30 previously unknown species during a month-long expedition to the Kermadec Trench, including bioluminescent organisms at depths exceeding 8,000 metres. ([Nature News](https://example.com))
+
+---
+
+## 🌍 Global South Roundup
+
+**Kenya Launches East Africa's Largest Solar Farm** — A 300MW solar installation in Turkana County has begun feeding power into the East African grid, marking a milestone in the region's renewable energy ambitions. ([The Guardian](https://example.com))
+`;
 
 const FALLBACK_TICKER = `
   <span class="ticker-item"><span class="label">Pegeia, CY</span> <span class="val">26°C ☀️</span></span>
@@ -209,21 +196,504 @@ const FALLBACK_TICKER = `
   <span class="ticker-item"><span class="label">USD/PLN</span> <span class="val down">3.97</span></span>
 `;
 
-// ── Source list ──
+// ── Styles ──
 
-const SOURCES = [
-  'BBC', 'The Guardian', 'Al Jazeera', 'France 24', 'DW', 'NPR',
-  'Politico EU', 'Der Spiegel', 'El País', 'Nikkei Asia', 'SCMP',
-  'Straits Times', 'Times of India', 'TechCrunch', 'The Verge', 'Wired',
-  'Nature', 'Science Daily', 'Xinhua', 'TASS', 'Meduza', 'Moscow Times',
-  'Cyprus Mail', 'Gazeta Wyborcza', 'Rzeczpospolita', 'Notes From Poland',
-  'ProPublica', 'Democracy Now', 'Rest of World', 'ABC Australia',
-  'Globe and Mail', 'The Hindu', 'Al Arabiya',
-];
+const PAGE_STYLES = `<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-// ── Main export ──
+  :root {
+    --red: #CC0000;
+    --red-dark: #990000;
+    --red-hover: #A30000;
+    --white: #FFFFFF;
+    --off-white: #F5F5F5;
+    --grey-50: #FAFAFA;
+    --grey-100: #EEEEEE;
+    --grey-200: #D5D5D5;
+    --grey-400: #999999;
+    --grey-600: #666666;
+    --grey-800: #333333;
+    --grey-900: #1A1A1A;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-serif: Georgia, 'Times New Roman', serif;
+  }
+
+  body {
+    font-family: var(--font);
+    line-height: 1.6;
+    color: var(--grey-900);
+    background: var(--off-white);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--red); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Ticker ── */
+  .ticker {
+    background: var(--red);
+    color: var(--white);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 7px 0;
+    overflow: hidden;
+  }
+  .ticker-inner {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .ticker-label {
+    font-weight: 800;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    white-space: nowrap;
+    opacity: 0.85;
+  }
+  .ticker-items {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .ticker-item { white-space: nowrap; }
+  .ticker-item .label { opacity: 0.8; }
+  .ticker-item .val { font-weight: 700; }
+  .ticker-item .up { color: #90EE90; }
+  .ticker-item .down { color: #FFD700; }
+  .ticker-sep { opacity: 0.3; }
+
+  /* ── Header ── */
+  .header {
+    background: var(--white);
+    border-bottom: 4px solid var(--red);
+  }
+  .header-inner {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .header h1 {
+    font-size: 32px;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--grey-900);
+    line-height: 1;
+  }
+  .header h1 a { color: var(--grey-900); text-decoration: none; }
+  .header h1 a:hover { color: var(--red); text-decoration: none; }
+  .header-right {
+    text-align: right;
+  }
+  .header-date {
+    font-size: 14px;
+    color: var(--grey-600);
+    font-weight: 500;
+  }
+  .header-sources {
+    font-size: 12px;
+    color: var(--grey-400);
+    margin-top: 2px;
+  }
+
+  /* ── Info bar ── */
+  .info-bar {
+    background: var(--white);
+    border-bottom: 1px solid var(--grey-100);
+    padding: 8px 0;
+  }
+  .info-bar-inner {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 24px;
+    font-size: 13px;
+    color: var(--grey-600);
+    font-style: italic;
+  }
+
+  /* ── Hero section ── */
+  .hero {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 32px 24px 24px;
+  }
+  .hero-card {
+    background: var(--white);
+    border-top: 4px solid var(--red);
+    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+    padding: 0;
+  }
+  .hero-card .card-header {
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--grey-100);
+  }
+  .hero-card .card-header h2 {
+    font-size: 14px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--red);
+    margin: 0;
+  }
+  .hero-card .card-header h2 a { color: var(--red); }
+  .hero-card .card-body {
+    padding: 20px 24px 28px;
+    columns: 2;
+    column-gap: 32px;
+  }
+  .hero-card .card-body p {
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--grey-800);
+    margin: 0 0 14px;
+    break-inside: avoid;
+  }
+  .hero-card .card-body p strong:first-child {
+    display: block;
+    font-size: 17px;
+    line-height: 1.4;
+    color: var(--grey-900);
+    margin-bottom: 4px;
+  }
+  .hero-card .card-body a { color: var(--grey-400); font-size: 13px; }
+  .hero-card .card-body a:hover { color: var(--red); }
+
+  /* ── Section cards grid ── */
+  .grid-wrap {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 24px 32px;
+  }
+  .sections-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+  .section-card {
+    background: var(--white);
+    border-top: 3px solid var(--red);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    display: flex;
+    flex-direction: column;
+  }
+  .card-header {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--grey-100);
+  }
+  .card-header h2 {
+    font-size: 13px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--red);
+    margin: 0;
+  }
+  .card-header h2 a { color: var(--red); }
+  .card-header h2 a:hover { text-decoration: underline; }
+  .card-header .emoji { margin-right: 6px; }
+  .card-body {
+    padding: 16px 18px 20px;
+    flex: 1;
+  }
+  .card-body p {
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--grey-800);
+    margin: 0 0 12px;
+  }
+  .card-body p:last-child { margin-bottom: 0; }
+  .card-body p strong:first-child {
+    display: block;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.35;
+    color: var(--grey-900);
+    margin-bottom: 3px;
+  }
+  .card-body p + p strong:first-child {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--grey-100);
+  }
+  .card-body a { color: var(--grey-400); font-size: 12px; }
+  .card-body a:hover { color: var(--red); }
+  .card-body h2, .card-body h3 { display: none; }
+  .card-body hr { display: none; }
+  .card-body table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
+  .card-body th { background: var(--red); color: var(--white); padding: 8px 12px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .card-body td { padding: 7px 12px; border-bottom: 1px solid var(--grey-100); font-size: 13px; }
+  .card-body tr:nth-child(even) { background: var(--grey-50); }
+  .card-body ul { padding-left: 18px; margin: 8px 0; }
+  .card-body li { font-size: 14px; line-height: 1.55; margin: 4px 0; color: var(--grey-800); }
+  .card-body blockquote { border-left: 3px solid var(--red); margin: 10px 0; padding: 8px 14px; background: var(--grey-50); color: var(--grey-800); font-style: italic; font-size: 14px; }
+
+  /* Card that spans 2 columns */
+  .card-wide { grid-column: span 2; }
+  .card-wide .card-body { columns: 2; column-gap: 24px; }
+  .card-wide .card-body p { break-inside: avoid; }
+
+  /* ── Subscribe banner ── */
+  .subscribe-banner {
+    background: var(--red);
+    color: var(--white);
+    padding: 28px 0;
+    margin-top: 8px;
+  }
+  .sections-grid .subscribe-banner {
+    grid-column: 1 / -1;
+    margin: 0 -24px;
+    padding: 28px 24px;
+  }
+  .subscribe-inner {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .subscribe-text h2 {
+    font-size: 22px;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+  .subscribe-text p {
+    font-size: 14px;
+    opacity: 0.9;
+  }
+  .subscribe-form {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .subscribe-form input[type="email"] {
+    padding: 10px 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.15);
+    color: var(--white);
+    font-size: 15px;
+    font-family: var(--font);
+    width: 280px;
+    border-radius: 0;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .subscribe-form input[type="email"]::placeholder { color: rgba(255,255,255,0.6); }
+  .subscribe-form input[type="email"]:focus { border-color: var(--white); background: rgba(255,255,255,0.2); }
+  .subscribe-form button {
+    padding: 10px 28px;
+    background: var(--white);
+    color: var(--red);
+    border: none;
+    font-size: 15px;
+    font-weight: 800;
+    font-family: var(--font);
+    cursor: pointer;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    transition: background 0.2s, color 0.2s;
+  }
+  .subscribe-form button:hover { background: var(--grey-900); color: var(--white); }
+
+  /* ── Footer ── */
+  .footer {
+    background: var(--grey-900);
+    color: var(--grey-400);
+    padding: 20px 0;
+  }
+  .footer-inner {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  /* ── Story page (single column reading view) ── */
+  .reading-view {
+    max-width: 740px;
+    margin: 0 auto;
+    padding: 32px 24px 48px;
+  }
+  .back-link {
+    display: inline-block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--red);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 24px;
+    text-decoration: none;
+  }
+  .back-link:hover { text-decoration: underline; }
+  .reading-view .digest-content h2 {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--grey-900);
+    margin: 0 0 20px;
+    padding-bottom: 12px;
+    border-bottom: 3px solid var(--red);
+  }
+  .reading-view .digest-content h3 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--grey-900);
+    margin: 28px 0 12px;
+  }
+  .reading-view .digest-content p {
+    font-family: var(--font-serif);
+    font-size: 17px;
+    line-height: 1.8;
+    color: var(--grey-800);
+    margin: 0 0 18px;
+  }
+  .reading-view .digest-content p strong:first-child {
+    display: block;
+    font-family: var(--font);
+    font-size: 19px;
+    line-height: 1.4;
+    color: var(--grey-900);
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid var(--grey-200);
+    margin-bottom: 6px;
+  }
+  .reading-view .digest-content p:first-of-type strong:first-child {
+    border-top: none; margin-top: 0; padding-top: 0;
+  }
+  .reading-view .digest-content a { color: var(--grey-400); font-size: 14px; }
+  .reading-view .digest-content a:hover { color: var(--red); }
+  .reading-view .digest-content hr { border: none; border-top: 1px solid var(--grey-200); margin: 32px 0; }
+  .reading-view .digest-content table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 15px; }
+  .reading-view .digest-content th { background: var(--red); color: var(--white); padding: 10px 14px; text-align: left; font-weight: 600; }
+  .reading-view .digest-content td { padding: 8px 14px; border-bottom: 1px solid var(--grey-100); }
+  .reading-view .digest-content tr:nth-child(even) { background: var(--grey-50); }
+  .reading-view .digest-content blockquote { border-left: 3px solid var(--red); margin: 16px 0; padding: 10px 20px; background: var(--grey-50); font-style: italic; }
+  .reading-view .digest-content ul { padding-left: 24px; margin: 12px 0; }
+  .reading-view .digest-content li { font-family: var(--font-serif); font-size: 17px; line-height: 1.7; margin: 6px 0; }
+
+  /* ── Sample note ── */
+  .sample-note {
+    background: var(--white);
+    border-left: 4px solid var(--red);
+    padding: 12px 18px;
+    font-size: 14px;
+    color: var(--grey-600);
+    margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 1024px) {
+    .sections-grid { grid-template-columns: repeat(2, 1fr); }
+    .card-wide { grid-column: span 2; }
+    .card-wide .card-body { columns: 1; }
+    .hero-card .card-body { columns: 1; }
+  }
+  @media (max-width: 640px) {
+    .sections-grid { grid-template-columns: 1fr; }
+    .card-wide { grid-column: span 1; }
+    .header h1 { font-size: 22px; letter-spacing: 1px; }
+    .hero-card .card-body { padding: 16px; }
+    .subscribe-inner { flex-direction: column; text-align: center; }
+    .subscribe-form { justify-content: center; width: 100%; }
+    .subscribe-form input[type="email"] { width: 100%; }
+    .ticker-inner { font-size: 11px; gap: 10px; }
+    .reading-view .digest-content p { font-size: 16px; }
+  }
+</style>`;
+
+// ── Page shell ──
+
+function pageHead(title: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)}</title>
+  <meta name="description" content="AI News Digest — daily world news from 38+ international sources, compiled by AI.">
+  ${PAGE_STYLES}
+</head>`;
+}
+
+function pageHeader(dateStr: string, tickerContent: string, sourceInfo?: string): string {
+  return `
+  <div class="ticker"><div class="ticker-inner"><span class="ticker-label">Live Data</span><div class="ticker-items">${tickerContent}</div></div></div>
+  <header class="header">
+    <div class="header-inner">
+      <h1><a href="/">AI News Digest</a></h1>
+      <div class="header-right">
+        <div class="header-date">${dateStr}</div>
+        ${sourceInfo ? `<div class="header-sources">${sourceInfo}</div>` : ''}
+      </div>
+    </div>
+  </header>`;
+}
+
+function subscribeBanner(): string {
+  return `
+  <div class="subscribe-banner">
+    <div class="subscribe-inner">
+      <div class="subscribe-text">
+        <h2>Get the digest in your inbox</h2>
+        <p>38+ international sources, distilled into one concise briefing every morning.</p>
+      </div>
+      <form class="subscribe-form" onsubmit="return false;">
+        <input type="email" placeholder="your@email.com" aria-label="Email address" required>
+        <button type="submit">Subscribe Free</button>
+      </form>
+    </div>
+  </div>`;
+}
+
+function pageFooter(): string {
+  return `
+  <footer class="footer">
+    <div class="footer-inner">
+      <span>Compiled daily by Claude on Cloudflare Workers</span>
+      <span>&copy; ${new Date().getFullYear()} AI News Digest</span>
+    </div>
+  </footer>
+</body>
+</html>`;
+}
+
+// ── Render section card ──
+
+function renderCard(section: DigestSection, date: string, wide: boolean = false): string {
+  const cls = wide ? 'section-card card-wide' : 'section-card';
+  const emojiSpan = section.emoji ? `<span class="emoji">${section.emoji}</span>` : '';
+  return `
+    <div class="${cls}">
+      <div class="card-header">
+        <h2><a href="/story/${date}/${section.slug}">${emojiSpan}${escapeHtml(section.title)}</a></h2>
+      </div>
+      <div class="card-body">${section.html}</div>
+    </div>`;
+}
+
+// ── Main export: landing page ──
 
 export function buildLandingPage(data?: DigestData | null): string {
+  const hasDigest = data?.digestMarkdown != null;
   const isLive = data != null;
 
   const displayDate = isLive ? data.date : new Date().toISOString().slice(0, 10);
@@ -236,456 +706,87 @@ export function buildLandingPage(data?: DigestData | null): string {
     ? renderTickerItems(data.weather, data.markets, data.feedStats)
     : FALLBACK_TICKER;
 
-  let newsColumnsHtml: string;
-  let sampleNote = '';
-  if (isLive) {
-    const sections = groupStoriesIntoSections(data.stories);
-    newsColumnsHtml = renderNewsColumns(sections);
-  } else {
-    newsColumnsHtml = renderNewsColumns(SAMPLE_SECTIONS);
-    sampleNote = '<div class="sample-note">Preview with sample articles — subscribe to receive the real daily digest every morning.</div>';
+  const sourceInfo = isLive
+    ? `Compiled from ${data.feedStats.succeeded} of ${data.feedStats.total} sources`
+    : 'Compiled from 38+ sources';
+
+  const digestMd = hasDigest ? data.digestMarkdown! : SAMPLE_DIGEST;
+  const sections = splitDigestSections(digestMd);
+
+  const sampleNote = hasDigest
+    ? ''
+    : '<div class="sample-note">Preview with sample articles — subscribe to receive the real daily digest every morning.</div>';
+
+  const date = isLive ? data.date : displayDate;
+
+  // Hero: first section gets large treatment
+  const hero = sections[0];
+  const rest = sections.slice(1);
+
+  // Build hero card
+  const heroHtml = hero ? `
+    <div class="hero">
+      ${sampleNote}
+      <div class="hero-card">
+        <div class="card-header">
+          <h2><a href="/story/${date}/${hero.slug}">${hero.emoji ? `<span class="emoji">${hero.emoji}</span>` : ''}${escapeHtml(hero.title)}</a></h2>
+        </div>
+        <div class="card-body">${hero.html}</div>
+      </div>
+    </div>` : `<div class="hero">${sampleNote}</div>`;
+
+  // Build grid cards — insert subscribe banner after every 3 cards
+  const gridCards: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    // Make first card in grid wide if there are enough cards
+    const wide = i === 0 && rest.length >= 4;
+    gridCards.push(renderCard(rest[i], date, wide));
+    if (i === 2) {
+      gridCards.push(subscribeBanner());
+    }
+  }
+  // If less than 3 cards, add subscribe at end
+  if (rest.length <= 2) {
+    gridCards.push(subscribeBanner());
   }
 
-  const sourceTags = SOURCES.map(s => `<span class="src-tag">${s}</span>`).join('');
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI News Digest — Daily World News from 38+ Sources</title>
-  <meta name="description" content="Get the best daily news from 38+ international sources, compiled by AI and delivered straight to your inbox.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --ink: #1a1a1a;
-      --paper: #faf9f6;
-      --cream: #f5f3ee;
-      --rule: #d4c9b8;
-      --muted: #8a7e6b;
-      --accent: #8b2500;
-      --heading: #3d2b1f;
-      --link: #6b3a2a;
-    }
-
-    body {
-      font-family: 'EB Garamond', 'Georgia', 'Times New Roman', serif;
-      line-height: 1.65;
-      color: var(--ink);
-      background: var(--paper);
-    }
-
-    /* ── Ticker belt ── */
-    .ticker {
-      background: var(--ink);
-      color: #d4c9b8;
-      font-size: 13px;
-      letter-spacing: 0.3px;
-      padding: 6px 0;
-      overflow: hidden;
-    }
-
-    .ticker-inner {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 24px;
-      display: flex;
-      align-items: center;
-      gap: 20px;
-      flex-wrap: wrap;
-    }
-
-    .ticker-label {
-      font-weight: 700;
-      color: #f5f3ee;
-      text-transform: uppercase;
-      font-size: 10px;
-      letter-spacing: 1.5px;
-      white-space: nowrap;
-    }
-
-    .ticker-items {
-      display: flex;
-      gap: 18px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    .ticker-item { white-space: nowrap; }
-    .ticker-item .label { color: #8a7e6b; }
-    .ticker-item .val { color: #f5f3ee; font-weight: 600; }
-    .ticker-item .up { color: #5a9a5a; }
-    .ticker-item .down { color: #c05050; }
-    .ticker-sep { color: #555; }
-
-    /* ── Header ── */
-    .header {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 20px 24px 0;
-    }
-
-    .header-rule { border: none; border-top: 3px solid var(--ink); }
-    .header-rule-thin { border: none; border-top: 1px solid var(--ink); margin-top: 6px; }
-
-    .header-main {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      padding: 10px 0 4px;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .header h1 {
-      font-size: 40px;
-      font-weight: 800;
-      color: var(--accent);
-      line-height: 1;
-      letter-spacing: -0.5px;
-    }
-
-    .header-date {
-      font-size: 15px;
-      color: var(--muted);
-      font-style: italic;
-    }
-
-    /* ── Sources strip ── */
-    .sources-strip {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 10px 24px;
-      border-bottom: 1px solid var(--rule);
-    }
-
-    .sources-strip-label {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 1.5px;
-      color: var(--muted);
-      margin-bottom: 6px;
-      font-weight: 600;
-    }
-
-    .sources-wrap {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 3px 8px;
-    }
-
-    .src-tag {
-      font-size: 11px;
-      color: var(--muted);
-      white-space: nowrap;
-    }
-
-    .src-tag::after { content: ' ·'; color: var(--rule); }
-    .src-tag:last-child::after { content: ''; }
-
-    /* ── Main layout ── */
-    .layout {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 24px 24px 60px;
-      display: grid;
-      grid-template-columns: 1fr 300px;
-      gap: 32px;
-      align-items: start;
-    }
-
-    /* ── News area (left) ── */
-    .news-area { min-width: 0; }
-
-    .news-label {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-      color: var(--accent);
-      font-weight: 700;
-      border-bottom: 2px solid var(--accent);
-      padding-bottom: 6px;
-      margin-bottom: 20px;
-    }
-
-    .sample-note {
-      background: var(--cream);
-      border-left: 3px solid var(--accent);
-      padding: 10px 16px;
-      font-size: 14px;
-      color: var(--muted);
-      font-style: italic;
-      margin-bottom: 20px;
-    }
-
-    .news-columns {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 24px;
-    }
-
-    .section { margin-bottom: 24px; }
-
-    .section-title {
-      font-size: 17px;
-      font-weight: 700;
-      color: var(--heading);
-      border-bottom: 1px solid var(--rule);
-      padding-bottom: 4px;
-      margin-bottom: 12px;
-    }
-
-    .section-emoji { font-style: normal; }
-
-    .story {
-      margin-bottom: 16px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--cream);
-    }
-
-    .story:last-child {
-      border-bottom: none;
-      margin-bottom: 0;
-      padding-bottom: 0;
-    }
-
-    .story h4 {
-      font-size: 16px;
-      font-weight: 700;
-      color: var(--ink);
-      line-height: 1.3;
-      margin-bottom: 4px;
-    }
-
-    .story h4 a {
-      color: var(--ink);
-      text-decoration: none;
-      border-bottom: 1px solid var(--rule);
-    }
-
-    .story h4 a:hover {
-      color: var(--accent);
-      border-bottom-color: var(--accent);
-    }
-
-    .story p {
-      font-size: 15px;
-      color: #4a4a4a;
-      margin-bottom: 4px;
-    }
-
-    .story .meta {
-      font-size: 12px;
-      color: var(--muted);
-      font-style: italic;
-    }
-
-    /* ── Sidebar (right) ── */
-    .sidebar { position: sticky; top: 24px; }
-
-    .subscribe-box {
-      background: var(--cream);
-      border: 1px solid var(--rule);
-      padding: 28px 24px;
-    }
-
-    .subscribe-box h2 {
-      font-size: 22px;
-      font-weight: 800;
-      color: var(--heading);
-      line-height: 1.25;
-      margin-bottom: 12px;
-    }
-
-    .subscribe-box p {
-      font-size: 15px;
-      color: #4a4a4a;
-      margin-bottom: 16px;
-    }
-
-    .subscribe-box ul {
-      list-style: none;
-      padding: 0;
-      margin: 0 0 20px;
-    }
-
-    .subscribe-box ul li {
-      font-size: 14px;
-      color: var(--ink);
-      padding: 5px 0;
-      border-bottom: 1px solid var(--rule);
-    }
-
-    .subscribe-box ul li:last-child { border-bottom: none; }
-    .subscribe-box ul li strong { color: var(--accent); }
-
-    .signup-form {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .signup-form input[type="email"] {
-      width: 100%;
-      padding: 10px 12px;
-      border: 1px solid var(--rule);
-      font-size: 15px;
-      font-family: inherit;
-      color: var(--ink);
-      background: white;
-    }
-
-    .signup-form input[type="email"]:focus {
-      outline: none;
-      border-color: var(--accent);
-    }
-
-    .signup-form button {
-      padding: 10px 20px;
-      background: var(--accent);
-      color: white;
-      border: none;
-      font-size: 15px;
-      font-weight: 700;
-      font-family: inherit;
-      cursor: pointer;
-      letter-spacing: 0.5px;
-      transition: background 0.2s;
-    }
-
-    .signup-form button:hover { background: #6d1d00; }
-
-    .signup-note {
-      font-size: 12px;
-      color: var(--muted);
-      font-style: italic;
-      margin-top: 6px;
-    }
-
-    .sidebar-extra {
-      margin-top: 24px;
-      padding: 20px 24px;
-      border: 1px solid var(--rule);
-      background: white;
-    }
-
-    .sidebar-extra h3 {
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--heading);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 10px;
-    }
-
-    .sidebar-extra p {
-      font-size: 14px;
-      color: #4a4a4a;
-      line-height: 1.5;
-    }
-
-    /* ── Footer ── */
-    .footer {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 20px 24px;
-      border-top: 2px solid var(--ink);
-      display: flex;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .footer p {
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    /* ── Responsive ── */
-    @media (max-width: 860px) {
-      .layout { grid-template-columns: 1fr; }
-      .sidebar { position: static; order: -1; }
-      .news-columns { grid-template-columns: 1fr; }
-      .header h1 { font-size: 30px; }
-      .ticker-inner { font-size: 12px; }
-    }
-  </style>
-</head>
+  return `${pageHead('AI News Digest — Daily World News from 38+ Sources')}
 <body>
-
-  <!-- Ticker belt -->
-  <div class="ticker">
-    <div class="ticker-inner">
-      <span class="ticker-label">Live Data</span>
-      <div class="ticker-items">
-        ${tickerContent}
-      </div>
+  ${pageHeader(dateStr, tickerContent, sourceInfo)}
+  ${heroHtml}
+  <div class="grid-wrap">
+    <div class="sections-grid">
+      ${gridCards.join('\n')}
     </div>
   </div>
+  ${pageFooter()}`;
+}
 
-  <!-- Header -->
-  <header class="header">
-    <hr class="header-rule">
-    <div class="header-main">
-      <h1>AI News Digest</h1>
-      <span class="header-date">${dateStr}</span>
-    </div>
-    <hr class="header-rule-thin">
-  </header>
+// ── Story page export ──
 
-  <!-- Sources strip -->
-  <div class="sources-strip">
-    <div class="sources-strip-label">Compiled from 38+ sources</div>
-    <div class="sources-wrap">${sourceTags}</div>
+export function buildStoryPage(data: DigestData, slug: string): string {
+  const sectionMd = data.digestMarkdown ? extractSectionBySlug(data.digestMarkdown, slug) : null;
+
+  if (!sectionMd) {
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Not Found</title></head><body><h1>Story not found</h1><p><a href="/">Back to digest</a></p></body></html>`;
+  }
+
+  const sectionHtml = markdownToHtml(sectionMd);
+  const dateObj = new Date(data.date + 'T12:00:00Z');
+  const dateStr = dateObj.toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+
+  const tickerContent = renderTickerItems(data.weather, data.markets, data.feedStats);
+  const sourceInfo = `Compiled from ${data.feedStats.succeeded} of ${data.feedStats.total} sources`;
+
+  return `${pageHead('AI News Digest — ' + escapeHtml(slug.replace(/-/g, ' ')))}
+<body>
+  ${pageHeader(dateStr, tickerContent, sourceInfo)}
+  <div class="reading-view">
+    <a href="/" class="back-link">&larr; Back to full digest</a>
+    <div class="digest-content">${sectionHtml}</div>
   </div>
-
-  <!-- Main layout -->
-  <div class="layout">
-
-    <!-- News (left) -->
-    <div class="news-area">
-      <div class="news-label">Today's Digest</div>
-      ${sampleNote}
-      <div class="news-columns">
-        ${newsColumnsHtml}
-      </div>
-    </div>
-
-    <!-- Sidebar (right) -->
-    <aside class="sidebar">
-      <div class="subscribe-box">
-        <h2>Get the digest in&nbsp;your inbox</h2>
-        <p>The world's news from 38+ sources, distilled by AI into one concise briefing.</p>
-        <ul>
-          <li><strong>38+</strong> international sources daily</li>
-          <li><strong>AI-compiled</strong> — no noise, just signal</li>
-          <li><strong>Your regions</strong> — Poland, Cyprus &amp; more</li>
-          <li><strong>6 AM</strong> — every morning, on time</li>
-        </ul>
-        <form class="signup-form" onsubmit="return false;">
-          <input type="email" placeholder="your@email.com" aria-label="Email address" required>
-          <button type="submit">Subscribe — it's free</button>
-        </form>
-        <p class="signup-note">One email per day. Unsubscribe anytime.</p>
-      </div>
-
-      <div class="sidebar-extra">
-        <h3>How it works</h3>
-        <p>Every day at 4 AM UTC, we fetch hundreds of articles from RSS feeds worldwide. AI triages them for relevance, removes duplicates, and compiles a single digest covering politics, tech, science, markets, and weather — delivered by 6 AM.</p>
-      </div>
-    </aside>
-
-  </div>
-
-  <footer class="footer">
-    <p>AI News Digest — compiled daily from 38+ international sources by Claude</p>
-    <p>Built on Cloudflare Workers</p>
-  </footer>
-
-</body>
-</html>`;
+  ${subscribeBanner()}
+  ${pageFooter()}`;
 }

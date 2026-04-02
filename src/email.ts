@@ -1,7 +1,7 @@
 import { EMAIL_FROM, EMAIL_TO, EMAIL_TO_PL } from './config';
 import type { Env, FeedStatus } from './types';
 
-function markdownToHtml(md: string): string {
+export function markdownToHtml(md: string): string {
   // Handle blockquotes before HTML escaping
   md = md.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
   // Merge consecutive blockquotes

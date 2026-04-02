@@ -107,4 +107,6 @@ export interface DigestData {
   weather: WeatherData[];
   markets: MarketData;
   feedStats: { total: number; succeeded: number };
+  digestMarkdown?: string;
+  emailMarkdown?: string;
 }
