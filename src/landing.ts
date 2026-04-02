@@ -403,6 +403,24 @@ const PAGE_STYLES = `<style>
   .section-content li { font-family: var(--font-serif); font-size: 14px; line-height: 1.55; margin: 4px 0; color: var(--grey-800); }
   .section-content blockquote { border-left: 3px solid var(--red); margin: 10px 0; padding: 8px 14px; background: var(--off-white); color: var(--grey-800); font-style: italic; font-size: 14px; }
 
+  /* ── Story thumbnails ── */
+  .story-thumb {
+    width: 110px;
+    height: 74px;
+    object-fit: cover;
+    float: right;
+    margin: 2px 0 8px 12px;
+    border-radius: 2px;
+  }
+  .col-center .story-thumb {
+    width: 150px;
+    height: 100px;
+  }
+  .col-right .story-thumb {
+    width: 90px;
+    height: 60px;
+  }
+
   /* ── Center column: larger typography for lead stories ── */
   .col-center .section-content p {
     font-size: 16px;
@@ -609,6 +627,12 @@ const PAGE_STYLES = `<style>
     margin-bottom: 16px;
   }
 
+  .reading-view .story-thumb {
+    width: 180px;
+    height: 120px;
+    margin: 4px 0 12px 16px;
+  }
+
   /* ── Responsive ── */
   @media (max-width: 1024px) {
     .newspaper {
@@ -631,6 +655,8 @@ const PAGE_STYLES = `<style>
     .subscribe-banner-inner { flex-direction: column; text-align: center; }
     .subscribe-banner-inner input[type="email"] { width: 100%; }
     .reading-view .section-content p { font-size: 16px; }
+    .story-thumb { width: 80px; height: 54px; }
+    .reading-view .story-thumb { width: 120px; height: 80px; }
   }
 </style>`;
 
@@ -692,12 +718,34 @@ function pageFooter(): string {
 
 // ── Render a section block ──
 
-function renderSectionBlock(section: DigestSection, date: string): string {
+/** Inject thumbnail images into section HTML by matching article URLs against storyImages map */
+function injectThumbnails(html: string, storyImages: Record<string, string>): string {
+  if (!storyImages || Object.keys(storyImages).length === 0) return html;
+
+  // Split HTML into paragraphs, find ones with article links that have images
+  // Each story paragraph looks like: <p><strong>Headline</strong> — text... (<a href="url">Source</a>)</p>
+  return html.replace(/<p>(\s*<strong>[\s\S]*?<\/p>)/g, (fullMatch, inner) => {
+    // Find article URLs in this paragraph
+    const linkMatches = [...inner.matchAll(/<a\s+href="([^"]+)"/g)];
+    for (const m of linkMatches) {
+      const articleUrl = m[1];
+      const imageUrl = storyImages[articleUrl];
+      if (imageUrl) {
+        const imgTag = `<img src="${escapeHtml(imageUrl)}" class="story-thumb" loading="lazy" alt="" onerror="this.style.display='none'">`;
+        return `<p>${imgTag}${inner}`;
+      }
+    }
+    return fullMatch;
+  });
+}
+
+function renderSectionBlock(section: DigestSection, date: string, storyImages?: Record<string, string>): string {
   const emojiSpan = section.emoji ? `<span class="emoji">${section.emoji}</span>` : '';
+  const contentHtml = storyImages ? injectThumbnails(section.html, storyImages) : section.html;
   return `
     <div class="section-block">
       <div class="section-title"><a href="/story/${date}/${section.slug}">${emojiSpan}${escapeHtml(section.title)}</a></div>
-      <div class="section-content">${section.html}</div>
+      <div class="section-content">${contentHtml}</div>
     </div>`;
 }
 
@@ -747,9 +795,10 @@ export function buildLandingPage(data?: DigestData | null): string {
     centerSections.push(leftSections.shift()!);
   }
 
-  const leftHtml = leftSections.map(s => renderSectionBlock(s, date)).join('');
-  const centerHtml = centerSections.map(s => renderSectionBlock(s, date)).join('');
-  const rightHtml = rightSections.map(s => renderSectionBlock(s, date)).join('');
+  const images = data?.storyImages || {};
+  const leftHtml = leftSections.map(s => renderSectionBlock(s, date, images)).join('');
+  const centerHtml = centerSections.map(s => renderSectionBlock(s, date, images)).join('');
+  const rightHtml = rightSections.map(s => renderSectionBlock(s, date, images)).join('');
 
   return `${pageHead('AI News Digest — Daily World News from 38+ Sources')}
 <body>
@@ -791,7 +840,10 @@ export function buildStoryPage(data: DigestData, slug: string): string {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Not Found</title></head><body><h1>Story not found</h1><p><a href="/">Back to digest</a></p></body></html>`;
   }
 
-  const sectionHtml = markdownToHtml(sectionMd);
+  let sectionHtml = markdownToHtml(sectionMd);
+  if (data.storyImages) {
+    sectionHtml = injectThumbnails(sectionHtml, data.storyImages);
+  }
   const dateObj = new Date(data.date + 'T12:00:00Z');
   const dateStr = dateObj.toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',

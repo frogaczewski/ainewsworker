@@ -112,8 +112,32 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
         importance: 'medium' as const,
         duplicate_of: null,
         editorial: item.editorial,
+        ...(item.imageUrl && { imageUrl: item.imageUrl }),
       }));
     }
+  }
+
+  // Carry over imageUrl from RSS items to triaged stories (Haiku doesn't return it)
+  const imagesByLink = new Map<string, string>();
+  for (const item of sortedItems) {
+    if (item.imageUrl && item.link) imagesByLink.set(item.link, item.imageUrl);
+  }
+  for (const story of triagedStories) {
+    if (!story.imageUrl && story.link && imagesByLink.has(story.link)) {
+      story.imageUrl = imagesByLink.get(story.link);
+    }
+  }
+
+  // Build story images map for the landing page
+  const storyImages: Record<string, string> = {};
+  for (const story of triagedStories) {
+    if (story.imageUrl && story.link) {
+      storyImages[story.link] = story.imageUrl;
+    }
+  }
+  const imageCount = Object.keys(storyImages).length;
+  if (imageCount > 0) {
+    console.log(`[Pipeline] Found ${imageCount} story images from RSS feeds`);
   }
 
   // Dry run: save triaged stories to KV without compilation, then stop
@@ -126,11 +150,12 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
         weather,
         markets,
         feedStats: { total: feedResult.total, succeeded: feedResult.total - feedResult.failed },
+        storyImages,
       };
       const json = JSON.stringify(digestData);
       await env.DIGEST_KV.put('digest:latest', json);
       await env.DIGEST_KV.put(`digest:${today}`, json);
-      console.log(`[Pipeline] Dry run: saved ${triagedStories.length} stories to KV (${json.length} bytes)`);
+      console.log(`[Pipeline] Dry run: saved ${triagedStories.length} stories to KV (${json.length} bytes, ${imageCount} images)`);
     } catch (err) {
       console.error(`[Pipeline] KV save failed: ${err}`);
     }
@@ -192,6 +217,7 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
       feedStats: { total: feedResult.total, succeeded: feedResult.total - feedResult.failed },
       digestMarkdown: fullDigest,
       emailMarkdown: emailBriefing,
+      storyImages,
     };
     const json = JSON.stringify(digestData);
     await Promise.all([

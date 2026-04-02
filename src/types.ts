@@ -20,6 +20,7 @@ export interface RssItem {
   pubDate: string;
   source: string;
   editorial?: boolean;
+  imageUrl?: string;
 }
 
 export interface TriagedStory {
@@ -34,6 +35,7 @@ export interface TriagedStory {
   conflicting?: boolean;
   conflict_note?: string;
   editorial?: boolean;
+  imageUrl?: string;
 }
 
 export interface WeatherLocation {
@@ -109,4 +111,5 @@ export interface DigestData {
   feedStats: { total: number; succeeded: number };
   digestMarkdown?: string;
   emailMarkdown?: string;
+  storyImages?: Record<string, string>; // maps article URL → image URL
 }

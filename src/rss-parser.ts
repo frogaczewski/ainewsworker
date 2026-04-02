@@ -40,6 +40,45 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+/** Extract image URL from an RSS item using multiple fallback sources */
+function extractImageUrl(itemXml: string): string {
+  // 1. media:content url attribute (most common for news feeds)
+  const mediaContent = extractAttr(itemXml, 'media:content', 'url');
+  if (mediaContent && looksLikeImageUrl(mediaContent)) return mediaContent;
+
+  // 2. media:thumbnail url attribute
+  const mediaThumbnail = extractAttr(itemXml, 'media:thumbnail', 'url');
+  if (mediaThumbnail) return mediaThumbnail;
+
+  // 3. enclosure with image type
+  const enclosureType = extractAttr(itemXml, 'enclosure', 'type');
+  if (enclosureType && enclosureType.startsWith('image/')) {
+    const enclosureUrl = extractAttr(itemXml, 'enclosure', 'url');
+    if (enclosureUrl) return enclosureUrl;
+  }
+
+  // 4. First <img> in description/content (some feeds embed HTML)
+  const descHtml = extractTag(itemXml, 'description') || extractTag(itemXml, 'content:encoded');
+  if (descHtml) {
+    const imgMatch = descHtml.match(/<img[^>]+src=["']([^"']+)["']/i);
+    if (imgMatch && imgMatch[1] && looksLikeImageUrl(imgMatch[1])) return imgMatch[1];
+  }
+
+  return '';
+}
+
+function looksLikeImageUrl(url: string): boolean {
+  if (!url || url.length < 10) return false;
+  // Skip tracking pixels and tiny icons
+  if (url.includes('1x1') || url.includes('pixel') || url.includes('tracking')) return false;
+  const lower = url.toLowerCase();
+  return lower.startsWith('http') && (
+    lower.includes('.jpg') || lower.includes('.jpeg') || lower.includes('.png') ||
+    lower.includes('.webp') || lower.includes('image') || lower.includes('/img/') ||
+    lower.includes('/photo') || lower.includes('/media/') || lower.includes('resize')
+  );
+}
+
 function isWithinHours(dateStr: string, hours: number): boolean {
   if (!dateStr) return true; // If no date, include the item
   try {
@@ -65,6 +104,7 @@ function parseRss2Items(xml: string, sourceName: string): RssItem[] {
     );
     const link = extractTag(itemXml, 'link') || extractAttr(itemXml, 'link', 'href');
     const pubDate = extractTag(itemXml, 'pubDate') || extractTag(itemXml, 'dc:date');
+    const imageUrl = extractImageUrl(itemXml);
 
     if (title && isWithinHours(pubDate, 36)) {
       items.push({
@@ -73,6 +113,7 @@ function parseRss2Items(xml: string, sourceName: string): RssItem[] {
         link,
         pubDate,
         source: sourceName,
+        ...(imageUrl && { imageUrl }),
       });
     }
   }
@@ -93,6 +134,7 @@ function parseAtomEntries(xml: string, sourceName: string): RssItem[] {
     );
     const link = extractAttr(entryXml, 'link', 'href') || extractTag(entryXml, 'link');
     const pubDate = extractTag(entryXml, 'published') || extractTag(entryXml, 'updated');
+    const imageUrl = extractImageUrl(entryXml);
 
     if (title && isWithinHours(pubDate, 36)) {
       items.push({
@@ -101,6 +143,7 @@ function parseAtomEntries(xml: string, sourceName: string): RssItem[] {
         link,
         pubDate,
         source: sourceName,
+        ...(imageUrl && { imageUrl }),
       });
     }
   }
