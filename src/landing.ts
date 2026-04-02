@@ -1,5 +1,5 @@
 // Landing page HTML template for AI News Digest
-// CNN/Economist-inspired redesign: red + white, sans-serif, full-width card grid
+// CNN/Economist-inspired: red + white, 3-column newspaper layout
 
 import { markdownToHtml } from './email';
 import type { DigestData, WeatherData, MarketData } from './types';
@@ -26,6 +26,25 @@ interface DigestSection {
   emoji: string;
   title: string;
   html: string;
+  rawTitle: string; // original title with emoji for classification
+}
+
+// Keywords to classify sections into columns
+const LEFT_KEYWORDS = ['poland', 'cyprus', 'nepal', 'ukraine', 'global south', 'roundup', 'regional', 'science', 'research', 'climate', 'environment', 'health'];
+const RIGHT_KEYWORDS = ['editorial', 'deep dive', 'analysis', 'opinion', 'also notable', 'notable', 'markets', 'currencies', 'weather', 'forecast'];
+// Everything else goes center (politics, tech, business, etc.)
+
+type Column = 'left' | 'center' | 'right';
+
+function classifySection(title: string): Column {
+  const t = title.toLowerCase();
+  for (const kw of LEFT_KEYWORDS) {
+    if (t.includes(kw)) return 'left';
+  }
+  for (const kw of RIGHT_KEYWORDS) {
+    if (t.includes(kw)) return 'right';
+  }
+  return 'center';
 }
 
 /** Split digest markdown into individual sections by --- separators and ## headers */
@@ -37,19 +56,15 @@ function splitDigestSections(markdown: string): DigestSection[] {
     const trimmed = chunk.trim();
     if (!trimmed) continue;
 
-    // Find the first ## or ### header
     const headerMatch = trimmed.match(/^(#{2,3})\s+(.+)$/m);
     if (!headerMatch) {
-      // No header found — skip (e.g. the title line "# Daily News Digest...")
-      // But if it has substantial content, wrap it
       if (trimmed.length > 100 && !trimmed.startsWith('# ')) {
-        sections.push({ slug: 'intro', emoji: '', title: 'Overview', html: markdownToHtml(trimmed) });
+        sections.push({ slug: 'intro', emoji: '', title: 'Overview', rawTitle: 'Overview', html: markdownToHtml(trimmed) });
       }
       continue;
     }
 
     const fullTitle = headerMatch[2].trim();
-    // Extract emoji (first char or two if it's an emoji)
     const emojiMatch = fullTitle.match(/^(\p{Emoji_Presentation}|\p{Emoji}\uFE0F?(?:\u200D\p{Emoji}\uFE0F?)*)\s*/u);
     const emoji = emojiMatch ? emojiMatch[1] : '';
     const title = emoji ? fullTitle.slice(emojiMatch![0].length).trim() : fullTitle;
@@ -57,12 +72,10 @@ function splitDigestSections(markdown: string): DigestSection[] {
 
     if (!slug) continue;
 
-    // Convert the chunk body (without the leading # title if present) to HTML
-    // Remove the first "# Title" line if it exists before the section
     const body = trimmed.replace(/^#\s+.+\n*/m, '').trim();
     const html = markdownToHtml(body);
 
-    sections.push({ slug, emoji, title, html });
+    sections.push({ slug, emoji, title, rawTitle: fullTitle, html });
   }
 
   return sections;
@@ -180,6 +193,12 @@ const SAMPLE_DIGEST = `## 🏛️ Global Politics
 ## 🌍 Global South Roundup
 
 **Kenya Launches East Africa's Largest Solar Farm** — A 300MW solar installation in Turkana County has begun feeding power into the East African grid, marking a milestone in the region's renewable energy ambitions. ([The Guardian](https://example.com))
+
+---
+
+## 📝 Editorial Deep Dives
+
+**The Strait of Hormuz and Europe's Energy Vulnerability** — With tensions escalating in the Persian Gulf, Europe faces a reckoning over its continued dependency on Middle Eastern energy supplies. Analysts warn that even a brief closure could trigger fuel rationing. ([The Economist](https://example.com))
 `;
 
 const FALLBACK_TICKER = `
@@ -204,11 +223,9 @@ const PAGE_STYLES = `<style>
   :root {
     --red: #CC0000;
     --red-dark: #990000;
-    --red-hover: #A30000;
     --white: #FFFFFF;
-    --off-white: #F5F5F5;
-    --grey-50: #FAFAFA;
-    --grey-100: #EEEEEE;
+    --off-white: #F9F9F9;
+    --grey-100: #E8E8E8;
     --grey-200: #D5D5D5;
     --grey-400: #999999;
     --grey-600: #666666;
@@ -222,7 +239,7 @@ const PAGE_STYLES = `<style>
     font-family: var(--font);
     line-height: 1.6;
     color: var(--grey-900);
-    background: var(--off-white);
+    background: var(--white);
     -webkit-font-smoothing: antialiased;
   }
 
@@ -236,10 +253,9 @@ const PAGE_STYLES = `<style>
     font-size: 13px;
     font-weight: 500;
     padding: 7px 0;
-    overflow: hidden;
   }
   .ticker-inner {
-    max-width: 1400px;
+    max-width: 100%;
     margin: 0 auto;
     padding: 0 24px;
     display: flex;
@@ -276,7 +292,7 @@ const PAGE_STYLES = `<style>
   .header-inner {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 14px 24px;
+    padding: 12px 24px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -284,178 +300,195 @@ const PAGE_STYLES = `<style>
     gap: 8px;
   }
   .header h1 {
-    font-size: 32px;
+    font-size: 34px;
     font-weight: 900;
-    letter-spacing: 1.5px;
+    letter-spacing: 2px;
     text-transform: uppercase;
     color: var(--grey-900);
     line-height: 1;
   }
   .header h1 a { color: var(--grey-900); text-decoration: none; }
   .header h1 a:hover { color: var(--red); text-decoration: none; }
-  .header-right {
-    text-align: right;
-  }
-  .header-date {
-    font-size: 14px;
-    color: var(--grey-600);
-    font-weight: 500;
-  }
-  .header-sources {
-    font-size: 12px;
-    color: var(--grey-400);
-    margin-top: 2px;
-  }
+  .header-right { text-align: right; }
+  .header-date { font-size: 14px; color: var(--grey-600); font-weight: 500; }
+  .header-sources { font-size: 12px; color: var(--grey-400); margin-top: 2px; }
 
-  /* ── Info bar ── */
-  .info-bar {
-    background: var(--white);
-    border-bottom: 1px solid var(--grey-100);
-    padding: 8px 0;
-  }
-  .info-bar-inner {
+  /* ── 3-Column Newspaper Layout ── */
+  .newspaper {
     max-width: 1400px;
     margin: 0 auto;
     padding: 0 24px;
-    font-size: 13px;
-    color: var(--grey-600);
-    font-style: italic;
+    display: grid;
+    grid-template-columns: 260px 1fr 300px;
+    gap: 0;
+    border-top: 1px solid var(--grey-100);
   }
 
-  /* ── Hero section ── */
-  .hero {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 32px 24px 24px;
+  /* Columns separated by vertical rules */
+  .col-left {
+    border-right: 1px solid var(--grey-200);
+    padding: 20px 20px 32px 0;
   }
-  .hero-card {
-    background: var(--white);
-    border-top: 4px solid var(--red);
-    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
-    padding: 0;
+  .col-center {
+    padding: 20px 24px 32px;
   }
-  .hero-card .card-header {
-    padding: 14px 24px;
-    border-bottom: 1px solid var(--grey-100);
+  .col-right {
+    border-left: 1px solid var(--grey-200);
+    padding: 20px 0 32px 20px;
   }
-  .hero-card .card-header h2 {
-    font-size: 14px;
+
+  /* ── Section block (within a column) ── */
+  .section-block {
+    margin-bottom: 28px;
+  }
+  .section-block:last-child { margin-bottom: 0; }
+
+  .section-title {
+    font-size: 12px;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 1.2px;
     color: var(--red);
-    margin: 0;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--red);
+    margin-bottom: 14px;
   }
-  .hero-card .card-header h2 a { color: var(--red); }
-  .hero-card .card-body {
-    padding: 20px 24px 28px;
-    columns: 2;
-    column-gap: 32px;
-  }
-  .hero-card .card-body p {
-    font-size: 15px;
-    line-height: 1.7;
-    color: var(--grey-800);
-    margin: 0 0 14px;
-    break-inside: avoid;
-  }
-  .hero-card .card-body p strong:first-child {
-    display: block;
-    font-size: 17px;
-    line-height: 1.4;
-    color: var(--grey-900);
-    margin-bottom: 4px;
-  }
-  .hero-card .card-body a { color: var(--grey-400); font-size: 13px; }
-  .hero-card .card-body a:hover { color: var(--red); }
+  .section-title a { color: var(--red); text-decoration: none; }
+  .section-title a:hover { text-decoration: underline; }
+  .section-title .emoji { margin-right: 4px; }
 
-  /* ── Section cards grid ── */
-  .grid-wrap {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 0 24px 32px;
+  /* Section divider between sections in same column */
+  .section-block + .section-block {
+    padding-top: 24px;
+    border-top: 1px solid var(--grey-100);
   }
-  .sections-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
-  }
-  .section-card {
-    background: var(--white);
-    border-top: 3px solid var(--red);
-    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-    display: flex;
-    flex-direction: column;
-  }
-  .card-header {
-    padding: 12px 18px;
-    border-bottom: 1px solid var(--grey-100);
-  }
-  .card-header h2 {
-    font-size: 13px;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--red);
-    margin: 0;
-  }
-  .card-header h2 a { color: var(--red); }
-  .card-header h2 a:hover { text-decoration: underline; }
-  .card-header .emoji { margin-right: 6px; }
-  .card-body {
-    padding: 16px 18px 20px;
-    flex: 1;
-  }
-  .card-body p {
-    font-size: 14px;
+
+  /* ── Story content inside sections ── */
+  .section-content h2, .section-content h3 { display: none; }
+  .section-content hr { display: none; }
+
+  .section-content p {
+    font-family: var(--font-serif);
+    font-size: 15px;
     line-height: 1.65;
     color: var(--grey-800);
     margin: 0 0 12px;
   }
-  .card-body p:last-child { margin-bottom: 0; }
-  .card-body p strong:first-child {
+  .section-content p:last-child { margin-bottom: 0; }
+
+  .section-content p strong:first-child {
     display: block;
-    font-size: 15px;
+    font-family: var(--font);
+    font-size: 16px;
     font-weight: 700;
     line-height: 1.35;
     color: var(--grey-900);
-    margin-bottom: 3px;
+    margin-bottom: 4px;
   }
-  .card-body p + p strong:first-child {
-    margin-top: 14px;
-    padding-top: 14px;
+  .section-content p + p strong:first-child {
+    margin-top: 16px;
+    padding-top: 16px;
     border-top: 1px solid var(--grey-100);
   }
-  .card-body a { color: var(--grey-400); font-size: 12px; }
-  .card-body a:hover { color: var(--red); }
-  .card-body h2, .card-body h3 { display: none; }
-  .card-body hr { display: none; }
-  .card-body table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
-  .card-body th { background: var(--red); color: var(--white); padding: 8px 12px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .card-body td { padding: 7px 12px; border-bottom: 1px solid var(--grey-100); font-size: 13px; }
-  .card-body tr:nth-child(even) { background: var(--grey-50); }
-  .card-body ul { padding-left: 18px; margin: 8px 0; }
-  .card-body li { font-size: 14px; line-height: 1.55; margin: 4px 0; color: var(--grey-800); }
-  .card-body blockquote { border-left: 3px solid var(--red); margin: 10px 0; padding: 8px 14px; background: var(--grey-50); color: var(--grey-800); font-style: italic; font-size: 14px; }
 
-  /* Card that spans 2 columns */
-  .card-wide { grid-column: span 2; }
-  .card-wide .card-body { columns: 2; column-gap: 24px; }
-  .card-wide .card-body p { break-inside: avoid; }
+  .section-content a { color: var(--grey-400); font-size: 13px; }
+  .section-content a:hover { color: var(--red); }
 
-  /* ── Subscribe banner ── */
+  .section-content table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
+  .section-content th { background: var(--red); color: var(--white); padding: 7px 10px; text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .section-content td { padding: 6px 10px; border-bottom: 1px solid var(--grey-100); font-size: 13px; }
+  .section-content tr:nth-child(even) { background: var(--off-white); }
+  .section-content ul { padding-left: 18px; margin: 8px 0; }
+  .section-content li { font-family: var(--font-serif); font-size: 14px; line-height: 1.55; margin: 4px 0; color: var(--grey-800); }
+  .section-content blockquote { border-left: 3px solid var(--red); margin: 10px 0; padding: 8px 14px; background: var(--off-white); color: var(--grey-800); font-style: italic; font-size: 14px; }
+
+  /* ── Center column: larger typography for lead stories ── */
+  .col-center .section-content p {
+    font-size: 16px;
+    line-height: 1.7;
+  }
+  .col-center .section-content p strong:first-child {
+    font-size: 18px;
+  }
+  .col-center .section-title {
+    font-size: 13px;
+    letter-spacing: 1.5px;
+  }
+
+  /* ── Right column: smaller, denser ── */
+  .col-right .section-content p {
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .col-right .section-content p strong:first-child {
+    font-size: 15px;
+  }
+  .col-right .section-title {
+    font-size: 11px;
+  }
+
+  /* ── Subscribe box (in right column) ── */
+  .subscribe-box {
+    background: var(--red);
+    color: var(--white);
+    padding: 20px;
+    margin-top: 24px;
+  }
+  .subscribe-box h3 {
+    font-size: 18px;
+    font-weight: 800;
+    margin-bottom: 8px;
+  }
+  .subscribe-box p {
+    font-size: 13px;
+    opacity: 0.9;
+    margin-bottom: 14px;
+    line-height: 1.5;
+  }
+  .subscribe-box form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .subscribe-box input[type="email"] {
+    padding: 9px 12px;
+    border: 2px solid rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.12);
+    color: var(--white);
+    font-size: 14px;
+    font-family: var(--font);
+    outline: none;
+    width: 100%;
+  }
+  .subscribe-box input[type="email"]::placeholder { color: rgba(255,255,255,0.5); }
+  .subscribe-box input[type="email"]:focus { border-color: var(--white); background: rgba(255,255,255,0.2); }
+  .subscribe-box button {
+    padding: 9px 20px;
+    background: var(--white);
+    color: var(--red);
+    border: none;
+    font-size: 14px;
+    font-weight: 800;
+    font-family: var(--font);
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: background 0.2s;
+  }
+  .subscribe-box button:hover { background: var(--grey-900); color: var(--white); }
+  .subscribe-note {
+    font-size: 11px;
+    opacity: 0.7;
+    margin-top: 6px;
+  }
+
+  /* ── Full-width subscribe banner (for story pages) ── */
   .subscribe-banner {
     background: var(--red);
     color: var(--white);
     padding: 28px 0;
-    margin-top: 8px;
   }
-  .sections-grid .subscribe-banner {
-    grid-column: 1 / -1;
-    margin: 0 -24px;
-    padding: 28px 24px;
-  }
-  .subscribe-inner {
+  .subscribe-banner-inner {
     max-width: 1400px;
     margin: 0 auto;
     padding: 0 24px;
@@ -465,49 +498,22 @@ const PAGE_STYLES = `<style>
     gap: 24px;
     flex-wrap: wrap;
   }
-  .subscribe-text h2 {
-    font-size: 22px;
-    font-weight: 800;
-    margin-bottom: 4px;
+  .subscribe-banner-inner h2 { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+  .subscribe-banner-inner p { font-size: 14px; opacity: 0.9; }
+  .subscribe-banner-inner form {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
   }
-  .subscribe-text p {
-    font-size: 14px;
-    opacity: 0.9;
+  .subscribe-banner-inner input[type="email"] {
+    padding: 10px 16px; border: 2px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.15);
+    color: var(--white); font-size: 15px; font-family: var(--font); width: 280px; outline: none;
   }
-  .subscribe-form {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    flex-wrap: wrap;
+  .subscribe-banner-inner input[type="email"]::placeholder { color: rgba(255,255,255,0.6); }
+  .subscribe-banner-inner input[type="email"]:focus { border-color: var(--white); }
+  .subscribe-banner-inner button {
+    padding: 10px 28px; background: var(--white); color: var(--red); border: none;
+    font-size: 15px; font-weight: 800; font-family: var(--font); cursor: pointer; text-transform: uppercase;
   }
-  .subscribe-form input[type="email"] {
-    padding: 10px 16px;
-    border: 2px solid rgba(255,255,255,0.3);
-    background: rgba(255,255,255,0.15);
-    color: var(--white);
-    font-size: 15px;
-    font-family: var(--font);
-    width: 280px;
-    border-radius: 0;
-    outline: none;
-    transition: border-color 0.2s;
-  }
-  .subscribe-form input[type="email"]::placeholder { color: rgba(255,255,255,0.6); }
-  .subscribe-form input[type="email"]:focus { border-color: var(--white); background: rgba(255,255,255,0.2); }
-  .subscribe-form button {
-    padding: 10px 28px;
-    background: var(--white);
-    color: var(--red);
-    border: none;
-    font-size: 15px;
-    font-weight: 800;
-    font-family: var(--font);
-    cursor: pointer;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    transition: background 0.2s, color 0.2s;
-  }
-  .subscribe-form button:hover { background: var(--grey-900); color: var(--white); }
+  .subscribe-banner-inner button:hover { background: var(--grey-900); color: var(--white); }
 
   /* ── Footer ── */
   .footer {
@@ -526,7 +532,7 @@ const PAGE_STYLES = `<style>
     font-size: 13px;
   }
 
-  /* ── Story page (single column reading view) ── */
+  /* ── Story reading view ── */
   .reading-view {
     max-width: 740px;
     margin: 0 auto;
@@ -543,7 +549,9 @@ const PAGE_STYLES = `<style>
     text-decoration: none;
   }
   .back-link:hover { text-decoration: underline; }
-  .reading-view .digest-content h2 {
+
+  .reading-view .section-content h2 {
+    display: block;
     font-size: 28px;
     font-weight: 800;
     color: var(--grey-900);
@@ -551,23 +559,24 @@ const PAGE_STYLES = `<style>
     padding-bottom: 12px;
     border-bottom: 3px solid var(--red);
   }
-  .reading-view .digest-content h3 {
+  .reading-view .section-content h3 {
+    display: block;
     font-size: 20px;
     font-weight: 700;
     color: var(--grey-900);
     margin: 28px 0 12px;
   }
-  .reading-view .digest-content p {
+  .reading-view .section-content p {
     font-family: var(--font-serif);
     font-size: 17px;
     line-height: 1.8;
     color: var(--grey-800);
     margin: 0 0 18px;
   }
-  .reading-view .digest-content p strong:first-child {
+  .reading-view .section-content p strong:first-child {
     display: block;
     font-family: var(--font);
-    font-size: 19px;
+    font-size: 20px;
     line-height: 1.4;
     color: var(--grey-900);
     margin-top: 32px;
@@ -575,48 +584,52 @@ const PAGE_STYLES = `<style>
     border-top: 1px solid var(--grey-200);
     margin-bottom: 6px;
   }
-  .reading-view .digest-content p:first-of-type strong:first-child {
+  .reading-view .section-content p:first-of-type strong:first-child {
     border-top: none; margin-top: 0; padding-top: 0;
   }
-  .reading-view .digest-content a { color: var(--grey-400); font-size: 14px; }
-  .reading-view .digest-content a:hover { color: var(--red); }
-  .reading-view .digest-content hr { border: none; border-top: 1px solid var(--grey-200); margin: 32px 0; }
-  .reading-view .digest-content table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 15px; }
-  .reading-view .digest-content th { background: var(--red); color: var(--white); padding: 10px 14px; text-align: left; font-weight: 600; }
-  .reading-view .digest-content td { padding: 8px 14px; border-bottom: 1px solid var(--grey-100); }
-  .reading-view .digest-content tr:nth-child(even) { background: var(--grey-50); }
-  .reading-view .digest-content blockquote { border-left: 3px solid var(--red); margin: 16px 0; padding: 10px 20px; background: var(--grey-50); font-style: italic; }
-  .reading-view .digest-content ul { padding-left: 24px; margin: 12px 0; }
-  .reading-view .digest-content li { font-family: var(--font-serif); font-size: 17px; line-height: 1.7; margin: 6px 0; }
+  .reading-view .section-content hr { display: block; border: none; border-top: 1px solid var(--grey-200); margin: 32px 0; }
+  .reading-view .section-content a { color: var(--grey-400); font-size: 14px; }
+  .reading-view .section-content a:hover { color: var(--red); }
+  .reading-view .section-content table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 15px; }
+  .reading-view .section-content th { background: var(--red); color: var(--white); padding: 10px 14px; text-align: left; font-weight: 600; }
+  .reading-view .section-content td { padding: 8px 14px; border-bottom: 1px solid var(--grey-100); }
+  .reading-view .section-content tr:nth-child(even) { background: var(--off-white); }
+  .reading-view .section-content blockquote { border-left: 3px solid var(--red); margin: 16px 0; padding: 10px 20px; background: var(--off-white); font-style: italic; }
+  .reading-view .section-content ul { padding-left: 24px; margin: 12px 0; }
+  .reading-view .section-content li { font-family: var(--font-serif); font-size: 17px; line-height: 1.7; margin: 6px 0; }
 
   /* ── Sample note ── */
   .sample-note {
-    background: var(--white);
+    background: var(--off-white);
     border-left: 4px solid var(--red);
-    padding: 12px 18px;
-    font-size: 14px;
+    padding: 10px 16px;
+    font-size: 13px;
     color: var(--grey-600);
-    margin-bottom: 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    margin-bottom: 16px;
   }
 
   /* ── Responsive ── */
   @media (max-width: 1024px) {
-    .sections-grid { grid-template-columns: repeat(2, 1fr); }
-    .card-wide { grid-column: span 2; }
-    .card-wide .card-body { columns: 1; }
-    .hero-card .card-body { columns: 1; }
+    .newspaper {
+      grid-template-columns: 1fr 280px;
+    }
+    .col-left { display: none; }
+    .col-center { border-right: none; padding-left: 0; }
+    /* Move left-column sections into center on tablet */
   }
-  @media (max-width: 640px) {
-    .sections-grid { grid-template-columns: 1fr; }
-    .card-wide { grid-column: span 1; }
+  @media (max-width: 720px) {
+    .newspaper {
+      grid-template-columns: 1fr;
+    }
+    .col-left, .col-right { display: block; border: none; padding: 16px 0; }
+    .col-center { padding: 16px 0; border: none; }
+    .col-left { order: 2; border-top: 1px solid var(--grey-200); }
+    .col-right { order: 3; border-top: 1px solid var(--grey-200); }
     .header h1 { font-size: 22px; letter-spacing: 1px; }
-    .hero-card .card-body { padding: 16px; }
-    .subscribe-inner { flex-direction: column; text-align: center; }
-    .subscribe-form { justify-content: center; width: 100%; }
-    .subscribe-form input[type="email"] { width: 100%; }
     .ticker-inner { font-size: 11px; gap: 10px; }
-    .reading-view .digest-content p { font-size: 16px; }
+    .subscribe-banner-inner { flex-direction: column; text-align: center; }
+    .subscribe-banner-inner input[type="email"] { width: 100%; }
+    .reading-view .section-content p { font-size: 16px; }
   }
 </style>`;
 
@@ -636,7 +649,7 @@ function pageHead(title: string): string {
 
 function pageHeader(dateStr: string, tickerContent: string, sourceInfo?: string): string {
   return `
-  <div class="ticker"><div class="ticker-inner"><span class="ticker-label">Live Data</span><div class="ticker-items">${tickerContent}</div></div></div>
+  <div class="ticker"><div class="ticker-inner"><span class="ticker-label">Live</span><div class="ticker-items">${tickerContent}</div></div></div>
   <header class="header">
     <div class="header-inner">
       <h1><a href="/">AI News Digest</a></h1>
@@ -651,12 +664,12 @@ function pageHeader(dateStr: string, tickerContent: string, sourceInfo?: string)
 function subscribeBanner(): string {
   return `
   <div class="subscribe-banner">
-    <div class="subscribe-inner">
-      <div class="subscribe-text">
+    <div class="subscribe-banner-inner">
+      <div>
         <h2>Get the digest in your inbox</h2>
-        <p>38+ international sources, distilled into one concise briefing every morning.</p>
+        <p>38+ international sources, one concise briefing every morning.</p>
       </div>
-      <form class="subscribe-form" onsubmit="return false;">
+      <form onsubmit="return false;">
         <input type="email" placeholder="your@email.com" aria-label="Email address" required>
         <button type="submit">Subscribe Free</button>
       </form>
@@ -676,17 +689,14 @@ function pageFooter(): string {
 </html>`;
 }
 
-// ── Render section card ──
+// ── Render a section block ──
 
-function renderCard(section: DigestSection, date: string, wide: boolean = false): string {
-  const cls = wide ? 'section-card card-wide' : 'section-card';
+function renderSectionBlock(section: DigestSection, date: string): string {
   const emojiSpan = section.emoji ? `<span class="emoji">${section.emoji}</span>` : '';
   return `
-    <div class="${cls}">
-      <div class="card-header">
-        <h2><a href="/story/${date}/${section.slug}">${emojiSpan}${escapeHtml(section.title)}</a></h2>
-      </div>
-      <div class="card-body">${section.html}</div>
+    <div class="section-block">
+      <div class="section-title"><a href="/story/${date}/${section.slug}">${emojiSpan}${escapeHtml(section.title)}</a></div>
+      <div class="section-content">${section.html}</div>
     </div>`;
 }
 
@@ -715,50 +725,59 @@ export function buildLandingPage(data?: DigestData | null): string {
 
   const sampleNote = hasDigest
     ? ''
-    : '<div class="sample-note">Preview with sample articles — subscribe to receive the real daily digest every morning.</div>';
+    : '<div class="sample-note">Preview with sample articles — subscribe to receive the real daily digest.</div>';
 
   const date = isLive ? data.date : displayDate;
 
-  // Hero: first section gets large treatment
-  const hero = sections[0];
-  const rest = sections.slice(1);
+  // Classify sections into 3 columns
+  const leftSections: DigestSection[] = [];
+  const centerSections: DigestSection[] = [];
+  const rightSections: DigestSection[] = [];
 
-  // Build hero card
-  const heroHtml = hero ? `
-    <div class="hero">
-      ${sampleNote}
-      <div class="hero-card">
-        <div class="card-header">
-          <h2><a href="/story/${date}/${hero.slug}">${hero.emoji ? `<span class="emoji">${hero.emoji}</span>` : ''}${escapeHtml(hero.title)}</a></h2>
-        </div>
-        <div class="card-body">${hero.html}</div>
-      </div>
-    </div>` : `<div class="hero">${sampleNote}</div>`;
+  for (const section of sections) {
+    const col = classifySection(section.title);
+    if (col === 'left') leftSections.push(section);
+    else if (col === 'right') rightSections.push(section);
+    else centerSections.push(section);
+  }
 
-  // Build grid cards — insert subscribe banner after every 3 cards
-  const gridCards: string[] = [];
-  for (let i = 0; i < rest.length; i++) {
-    // Make first card in grid wide if there are enough cards
-    const wide = i === 0 && rest.length >= 4;
-    gridCards.push(renderCard(rest[i], date, wide));
-    if (i === 2) {
-      gridCards.push(subscribeBanner());
-    }
+  // If center is empty, move first left section there
+  if (centerSections.length === 0 && leftSections.length > 0) {
+    centerSections.push(leftSections.shift()!);
   }
-  // If less than 3 cards, add subscribe at end
-  if (rest.length <= 2) {
-    gridCards.push(subscribeBanner());
-  }
+
+  const leftHtml = leftSections.map(s => renderSectionBlock(s, date)).join('');
+  const centerHtml = centerSections.map(s => renderSectionBlock(s, date)).join('');
+  const rightHtml = rightSections.map(s => renderSectionBlock(s, date)).join('');
 
   return `${pageHead('AI News Digest — Daily World News from 38+ Sources')}
 <body>
   ${pageHeader(dateStr, tickerContent, sourceInfo)}
-  ${heroHtml}
-  <div class="grid-wrap">
-    <div class="sections-grid">
-      ${gridCards.join('\n')}
+
+  <div class="newspaper">
+    <div class="col-left">
+      ${sampleNote}
+      ${leftHtml || '<div class="section-block"><div class="section-title">Regional</div><div class="section-content"><p>No regional stories today.</p></div></div>'}
+    </div>
+
+    <div class="col-center">
+      ${centerHtml}
+    </div>
+
+    <div class="col-right">
+      ${rightHtml}
+      <div class="subscribe-box">
+        <h3>Get the digest in your inbox</h3>
+        <p>38+ sources, distilled by AI into one briefing every morning.</p>
+        <form onsubmit="return false;">
+          <input type="email" placeholder="your@email.com" aria-label="Email address" required>
+          <button type="submit">Subscribe Free</button>
+        </form>
+        <div class="subscribe-note">One email per day. Unsubscribe anytime.</div>
+      </div>
     </div>
   </div>
+
   ${pageFooter()}`;
 }
 
@@ -785,7 +804,7 @@ export function buildStoryPage(data: DigestData, slug: string): string {
   ${pageHeader(dateStr, tickerContent, sourceInfo)}
   <div class="reading-view">
     <a href="/" class="back-link">&larr; Back to full digest</a>
-    <div class="digest-content">${sectionHtml}</div>
+    <div class="section-content">${sectionHtml}</div>
   </div>
   ${subscribeBanner()}
   ${pageFooter()}`;
