@@ -188,17 +188,23 @@ const PAGE_STYLES = `<style>
   .digest-label a { color: var(--accent); text-decoration: none; }
   .sample-note { background: var(--cream); border-left: 3px solid var(--accent); padding: 10px 16px; font-size: 14px; color: var(--muted); font-style: italic; margin-bottom: 20px; }
 
-  .digest-content h1 { font-size: 26px; font-weight: 700; color: var(--ink); border-bottom: 3px solid var(--accent); padding-bottom: 12px; margin: 0 0 16px; }
-  .digest-content h2 { font-size: 21px; font-weight: 700; color: var(--accent); margin: 28px 0 14px; padding-bottom: 6px; border-bottom: 1px solid var(--rule); }
+  .digest-content { max-width: 750px; }
+  .digest-content h1 { display: none; }
+  .digest-content h2 { font-size: 24px; font-weight: 700; color: var(--accent); margin: 36px 0 16px; padding: 8px 0 8px 14px; border-bottom: none; border-left: 4px solid var(--accent); background: var(--cream); }
+  .digest-content h2:first-child { margin-top: 0; }
   .digest-content h2 a { color: var(--accent); text-decoration: none; border-bottom: none; }
-  .digest-content h2 a:hover { border-bottom: 2px solid var(--accent); }
-  .digest-content h3 { font-size: 18px; font-weight: 700; color: var(--heading); margin: 20px 0 10px; }
-  .digest-content p { font-size: 16px; color: var(--ink); margin: 8px 0; }
-  .digest-content strong { color: var(--ink); } .digest-content em { color: var(--muted); }
-  .digest-content hr { border: none; border-top: 1px solid var(--rule); margin: 24px 0; }
+  .digest-content h2 a:hover { text-decoration: underline; }
+  .digest-content h3 { font-size: 18px; font-weight: 700; color: var(--heading); margin: 24px 0 10px; }
+  .digest-content p { font-size: 16px; color: var(--ink); margin: 10px 0 14px; line-height: 1.75; }
+  .digest-content strong { color: var(--ink); }
+  .digest-content em { color: var(--muted); font-size: 15px; }
+  .digest-content p strong:first-child { display: block; font-size: 17px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--rule); }
+  .digest-content h2 + p strong:first-child, .digest-content hr + p strong:first-child { border-top: none; margin-top: 8px; padding-top: 0; }
+  .digest-content hr { border: none; border-top: 2px solid var(--rule); margin: 32px 0; }
   .digest-content a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--rule); }
   .digest-content a:hover { border-bottom-color: var(--accent); }
-  .digest-content ul { padding-left: 20px; margin: 8px 0; } .digest-content li { margin: 6px 0; font-size: 16px; }
+  .digest-content ul { padding-left: 20px; margin: 12px 0; }
+  .digest-content li { margin: 8px 0; font-size: 16px; line-height: 1.65; }
   .digest-content table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 15px; }
   .digest-content th, .digest-content thead tr th { background: var(--table-header); color: var(--table-header-text); padding: 10px 14px; text-align: left; font-weight: 600; }
   .digest-content td { padding: 8px 14px; border-bottom: 1px solid var(--rule); }
