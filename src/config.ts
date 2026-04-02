@@ -138,6 +138,7 @@ export const EMAIL_TO_PL = [
   { email: 'bartek.szajkowski@gmail.com', name: 'Bartek Szajkowski' },
   { email: 'enterbios@gmail.com', name: 'Enterbios' },
   { email: 'mail@danielturczanski.com', name: 'Daniel Turczański' },
+  { email: 'konradlazarski@gmail.com', name: 'Konrad Łazarski' },
 ];
 
 export const WMO_WEATHER_CODES: Record<number, string> = {
