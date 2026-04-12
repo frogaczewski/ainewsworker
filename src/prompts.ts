@@ -233,6 +233,85 @@ export function buildEmailBriefingPrompt(fullDigest: string, websiteUrl: string)
 ${fullDigest}`;
 }
 
+export function buildHeadlineEmailPrompt(fullDigest: string, websiteUrl: string): string {
+  return `You are creating a scannable headline-driven email briefing from a full news digest. The full digest is published on a website — this email is a quick scan that lets the reader decide what to read in depth online.
+
+## FORMAT
+
+The email has TWO distinct tiers of content:
+
+### Tier 1: Top Stories (prose treatment)
+Select the 5-8 most important stories from the digest. For each:
+- **Bold headline**
+- 1-2 sentences capturing the key facts and why it matters
+- Source citation as a clickable link: ([Source](url))
+- If multiple sources covered it, name them
+
+These should be the stories where the reader thinks "I need to know about this." Prioritize: breaking events, priority countries (Poland, Cyprus, Nepal, Ukraine), and stories with multi-source or conflicting coverage.
+
+### Tier 2: Headlines (scan-only, no prose)
+Group ALL remaining stories under bold category sub-headers. Each story is ONE bullet point:
+- **Bold headline** — single-clause summary. ([Source](url))
+
+Category sub-headers to use (only include categories that have stories):
+**Global Politics** | **Poland** | **Cyprus** | **Nepal** | **Europe** | **Americas** | **Asia** | **Africa & Middle East** | **Technology** | **Climate** | **Science** | **Business** | **Health**
+
+### Other sections
+- "Happened in the World" — keep verbatim from the full digest (already one-liners)
+- "Editorial Picks" — keep the 2-3 sentence summaries from the full digest (do NOT shorten)
+- Markets table and Weather tables — copy verbatim
+- REMOVE "Also Notable" — replace with: **[See all stories on the website →](${websiteUrl})**
+
+## STRUCTURE
+
+*[Read the full digest online →](${websiteUrl})*
+
+[Title, date line, and compiled-from note — keep exactly as in the full digest]
+
+---
+
+## Top Stories
+
+[5-8 stories with 1-2 sentence summaries]
+
+---
+
+## Headlines
+
+[Categorized one-liner bullets for everything else]
+
+---
+
+## 🌐 Happened in the World
+[Verbatim from full digest]
+
+---
+
+## 📰 Editorial Picks
+[Full summaries from digest, not shortened]
+
+---
+
+## 📈 Markets & Currencies
+[Verbatim table]
+
+---
+
+## 🌤️ Weather Forecast
+[Verbatim tables]
+
+## RULES
+- Target: 600-900 words maximum
+- The Top Stories section is the ONLY place with multi-sentence prose
+- Headlines section must be pure one-liner bullets — no paragraphs
+- Do NOT use markdown blockquote syntax (lines starting with >)
+- Preserve all markdown formatting: headers, bold, links, tables, horizontal rules
+- Every story from the full digest should appear somewhere (either Top Stories or Headlines) — don't drop stories, just compress them to headlines
+
+## FULL DIGEST TO CONVERT
+${fullDigest}`;
+}
+
 export function buildTranslationPrompt(digest: string): string {
   return `Przetłumacz poniższy biuletyn informacyjny z angielskiego na polski. Wymagania:
 

@@ -2,9 +2,9 @@ import { fetchAllFeeds } from './feeds';
 import { fetchWeather } from './weather';
 import { fetchMarketData } from './markets';
 import { callHaiku, callSonnet } from './llm';
-import { buildTriagePrompt, buildCompilationPrompt, buildEmailBriefingPrompt, buildTranslationPrompt } from './prompts';
+import { buildTriagePrompt, buildCompilationPrompt, buildEmailBriefingPrompt, buildHeadlineEmailPrompt, buildTranslationPrompt } from './prompts';
 import { sendDigestEmail, sendErrorEmail } from './email';
-import { EMAIL_TO_PL } from './config';
+import { EMAIL_TO, EMAIL_TO_PL } from './config';
 import { buildLandingPage, buildStoryPage, generateSlug } from './landing';
 import type { Env, TriagedStory, FeedStatus, DigestData } from './types';
 
@@ -209,6 +209,18 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   const todayDate = new Date().toISOString().slice(0, 10);
   emailBriefing = rewriteStoryLinks(emailBriefing, websiteUrl, todayDate);
 
+  // Step 5c: Headline email (A/B test — new scannable format, sent only to Filip)
+  console.log('[Pipeline] Step 5c: Generating headline email (A/B test)...');
+  let headlineEmail = '';
+  try {
+    headlineEmail = await callSonnet(env, buildHeadlineEmailPrompt(fullDigest, websiteUrl));
+    headlineEmail = rewriteStoryLinks(headlineEmail, websiteUrl, todayDate);
+    console.log(`[Pipeline] Headline email compiled (${headlineEmail.length} characters)`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`[Pipeline] Headline email failed, skipping A/B test: ${msg}`);
+  }
+
   // Save everything to KV — full digest + email briefing
   try {
     const today = new Date().toISOString().slice(0, 10);
@@ -240,10 +252,13 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     console.error(`[Pipeline] KV save failed (non-fatal): ${err}`);
   }
 
-  // Test mode: send only English email to Filip, skip Polish
+  // Test mode: send only English emails to Filip, skip Polish
   if (opts.testMode) {
-    console.log('[Pipeline] Test mode — sending email only to Filip...');
+    console.log('[Pipeline] Test mode — sending emails only to Filip...');
     await sendDigestEmail(env, emailBriefing);
+    if (headlineEmail) {
+      await sendDigestEmail(env, headlineEmail, undefined, EMAIL_TO, `[NEW] Daily News Digest — ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}`);
+    }
     console.log('[Pipeline] Test mode complete');
     return 'test-success';
   }
@@ -278,12 +293,28 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     year: 'numeric',
   });
 
+  const enDateStr = today.toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
   const emailTasks: Promise<void>[] = [
     sendDigestEmail(env, emailBriefing).catch(async () => {
       console.log('[Pipeline] English email failed, retrying once...');
       await sendDigestEmail(env, emailBriefing);
     }),
   ];
+
+  // A/B test: send headline-format email only to Filip
+  if (headlineEmail) {
+    emailTasks.push(
+      sendDigestEmail(env, headlineEmail, undefined, EMAIL_TO, `[NEW] Daily News Digest — ${enDateStr}`).catch((err) => {
+        console.log(`[Pipeline] Headline test email failed: ${err}`);
+      }),
+    );
+  }
 
   if (polishBriefing) {
     for (const plRecipient of EMAIL_TO_PL) {
