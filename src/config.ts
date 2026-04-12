@@ -30,6 +30,12 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Haaretz', url: 'https://www.haaretz.com/cmlink/1.628765', category: 'global' },
   { name: 'Times of Israel', url: 'https://www.timesofisrael.com/feed/', category: 'global' },
 
+  // Iran
+  { name: 'Tehran Times', url: 'https://www.tehrantimes.com/rss', category: 'global' },
+
+  // Saudi Arabia
+  { name: 'Arab News', url: 'https://www.arabnews.com/rss.xml', category: 'global' },
+
   // Turkey
   { name: 'TRT World', url: 'https://www.trtworld.com/rss', category: 'global' },
 
@@ -52,6 +58,8 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'The Hindu', url: 'https://www.thehindu.com/news/international/feeder/default.rss', category: 'global' },
   { name: 'Dawn (Pakistan)', url: 'https://www.dawn.com/feeds/home', category: 'global' },
   { name: 'Scroll.in', url: 'https://scroll.in/rss/all', category: 'global' },
+  { name: 'NDTV', url: 'https://feeds.feedburner.com/ndtvnews-top-stories', category: 'global' },
+  { name: 'The Wire', url: 'https://thewire.in/feed', category: 'global' },
 
   // Southeast Asia
   { name: 'Bangkok Post', url: 'https://www.bangkokpost.com/rss/data/topstories.xml', category: 'global' },
@@ -69,16 +77,22 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'AllAfrica', url: 'https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf', category: 'global' },
   { name: 'Nation Africa', url: 'https://nation.africa/service/rss/kenya/news/rss', category: 'global' },
   { name: 'Mail & Guardian', url: 'https://mg.co.za/feed/', category: 'global' },
+  { name: 'Mada Masr', url: 'https://www.madamasr.com/en/feed/', category: 'global' },
+  { name: 'The East African', url: 'https://www.theeastafrican.co.ke/tea/rss', category: 'global' },
+  { name: 'Addis Standard', url: 'https://addisstandard.com/feed/', category: 'global' },
 
   // Latin America
   { name: 'Buenos Aires Times', url: 'https://www.batimes.com.ar/feed', category: 'global' },
   { name: 'MercoPress', url: 'https://en.mercopress.com/rss', category: 'global' },
   { name: 'Tico Times', url: 'https://ticotimes.net/feed', category: 'global' },
   { name: 'Brasil de Fato', url: 'https://www.brasildefato.com.br/rss2.xml', category: 'global' },
+  { name: 'The Brazilian Report', url: 'https://brazilian.report/feed/', category: 'global' },
 
   // Central Asia
   { name: 'The Diplomat', url: 'https://thediplomat.com/feed/', category: 'global' },
   { name: 'RFE/RL Central Asia', url: 'https://www.rferl.org/api/z-pqpiev-qpp', category: 'global' },
+  { name: 'Eurasianet', url: 'https://eurasianet.org/feed', category: 'global' },
+  { name: 'The Astana Times', url: 'https://astanatimes.com/feed/', category: 'global' },
 
   // Europe / EU
   { name: 'Politico EU', url: 'https://www.politico.eu/feed/', category: 'politics' },

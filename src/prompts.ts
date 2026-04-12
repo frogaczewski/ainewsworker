@@ -7,7 +7,7 @@ export function buildTriagePrompt(items: RssItem[]): string {
 
   return `You are a news editor for a daily digest. Your reader lives in Cyprus with ties to Poland and interests in technology, climate, science, health, and global politics.
 
-Below are headlines and summaries from ~80 news sources published in the last 24 hours. Your job:
+Below are headlines and summaries from ~100 news sources published in the last 24 hours. Your job:
 
 1. Select the 50-80 most important/interesting stories
 2. For each selected story, output a JSON object:
@@ -140,6 +140,16 @@ Pick 3-4 notable stories from the Global South. Use sub-headers for each region.
 
 ---
 
+## 🌐 Happened in the World
+
+[One-liner bullet points for stories from countries/regions that didn't make it into the sections above. The purpose is geographic breadth — the reader should feel they've scanned the entire globe. Each bullet: one sentence + source link. Aim for 5-8 bullets covering as many different regions as possible. Examples:
+- **Kazakhstan**: Government approved new rare earth mining regulations. ([The Astana Times](url))
+- **Egypt**: Cairo metro expansion project receives $2B funding. ([Mada Masr](url))
+- **Iran**: Tehran announced new satellite launch timeline. ([Tehran Times](url))
+Prioritize stories from Central Asia, Middle East, Africa, and Latin America — regions that tend to be underrepresented in the main sections.]
+
+---
+
 ## 📰 Editorial Picks
 
 [Select 2-3 of the best editorial/investigative articles from sources marked "editorial": true (Bellingcat, The Conversation, The Intercept, Global Voices, Carbon Brief, The Markup, ICIJ, OCCRP, IPS News, Mongabay, ProPublica). IMPORTANT: Pick editorials on DIFFERENT topics — do not select multiple pieces about the same subject or from the same source. Aim for topical diversity (e.g. one environment, one tech/policy, one geopolitics). For each: write 2-3 sentences summarising the core argument and why it matters, then cite the source with link. The reader should understand what the piece argues without clicking through.]
@@ -172,7 +182,7 @@ Pick 3-4 notable stories from the Global South. Use sub-headers for each region.
 *Generated automatically by AI News Digest. [Read the full digest online.](https://ainewsworker.rogaczewski-dev.workers.dev/)*
 
 ## GUIDELINES
-- Target approximately 2,500-3,000 words for the entire digest
+- Target approximately 2,500-3,500 words for the entire digest
 - Each story: 3-6 sentences, comprehensive enough that the reader never needs to click through
 - CRITICAL FORMATTING: Each story MUST start with a **bold headline** on its own line, followed by a blank line, then the story text. Stories MUST be separated by a blank line. Example:
 
@@ -211,6 +221,7 @@ export function buildEmailBriefingPrompt(fullDigest: string, websiteUrl: string)
 - Keep the title, date line, and compiled-from note exactly as they are
 - Keep the weather tables and markets table exactly as they are (copy verbatim)
 - REMOVE the "Also Notable" section — replace with: "**[See all stories on the website →](${websiteUrl})**"
+- Keep the "Happened in the World" section verbatim (it's already one-liners, don't shorten further)
 - For "Editorial Picks": keep the 2-3 sentence summaries from the full digest (do NOT shorten these further). Add a link after each: [Read more →](${websiteUrl})
 - Each story MUST be its own paragraph, separated by a blank line
 - Add at the very top (before the title): *[Read the full digest online →](${websiteUrl})*
