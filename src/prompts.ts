@@ -7,7 +7,7 @@ export function buildTriagePrompt(items: RssItem[]): string {
 
   return `You are a news editor for a daily digest. Your reader lives in Cyprus with ties to Poland and interests in technology, climate, science, health, and global politics.
 
-Below are headlines and summaries from ~35 news sources published in the last 24 hours. Your job:
+Below are headlines and summaries from ~80 news sources published in the last 24 hours. Your job:
 
 1. Select the 50-80 most important/interesting stories
 2. For each selected story, output a JSON object:
@@ -22,12 +22,17 @@ Below are headlines and summaries from ~35 news sources published in the last 24
      "duplicate_of": null or index of earlier story covering same event,
      "conflicting": false,
      "conflict_note": null,
-     "editorial": true if the source is marked [EDITORIAL], false otherwise
+     "editorial": true if the source is marked [EDITORIAL], false otherwise,
+     "all_sources": [{"name": "Source Name", "link": "url", "angle": "brief perspective note or null"}]
    }
 
-3. IMPORTANT: When the same event appears in multiple sources, mark duplicates and note which sources covered it. This is crucial for cross-referencing.
+3. MULTI-SOURCE TRACKING (CRITICAL): When the same event appears in multiple sources:
+   - Keep the FIRST occurrence as the primary entry with full details
+   - On the PRIMARY entry, populate "all_sources" with EVERY source that covered this event — include the source name, link, and a brief note on their angle/perspective (e.g., "focuses on civilian casualties", "emphasizes economic impact", "reports government position"). Set angle to null if the coverage is essentially identical.
+   - On DUPLICATE entries, set "duplicate_of" to the index of the primary entry
+   - This is essential — the compilation step needs to know which sources reported each story so it can cite them by name and describe their differing perspectives.
 
-4. CONFLICTING REPORTS: When sources report the same event with different framing, different facts, or contradictory narratives (e.g., Western vs non-Western media, right-wing vs left-wing outlets, global south vs developed world perspectives), set "conflicting": true and provide a brief "conflict_note" explaining the key difference (e.g., "Western sources emphasize sanctions impact, while Xinhua focuses on diplomatic overtures").
+4. CONFLICTING REPORTS: When sources report the same event with different framing, different facts, or contradictory narratives (e.g., Western vs non-Western media, right-wing vs left-wing outlets, global south vs developed world perspectives), set "conflicting": true and provide a brief "conflict_note" explaining the key difference (e.g., "Western sources emphasize sanctions impact, while Xinhua focuses on diplomatic overtures"). Also ensure all_sources captures each source's specific angle.
 
 5. Prioritize:
    - MUST INCLUDE: Always select stories about Poland, Cyprus, Nepal, and Ukraine (especially war/conflict updates) — these are the reader's priority countries. Include at least 2-3 Nepal stories if any exist in the feed.
@@ -76,7 +81,15 @@ export function buildCompilationPrompt(
 
   return `You are writing a daily news digest for Filip, who lives in Pegeia, Cyprus and has ties to Poland. He follows technology, climate, science, global politics, and business closely. This digest will be published on a website.
 
-Write a comprehensive, well-organized daily digest in markdown. Each story should be 3-6 sentences — thorough enough that the reader never needs to click through to the original article. Include key facts, figures, quotes, and context. Always cite sources as clickable markdown links: ([Source Name](url)). When the same story appeared in multiple outlets, mention that for credibility. When stories have conflicting coverage between sources (flagged with "conflicting": true), explicitly describe how different outlets reported it differently. Do NOT use markdown blockquote syntax (lines starting with >) as it does not render well in email.
+Write a comprehensive, well-organized daily digest in markdown. Each story should be 3-6 sentences — thorough enough that the reader never needs to click through to the original article. Include key facts, figures, quotes, and context. Always cite sources as clickable markdown links: ([Source Name](url)). Do NOT use markdown blockquote syntax (lines starting with >) as it does not render well in email.
+
+## MULTI-SOURCE ATTRIBUTION (IMPORTANT)
+When a story has an "all_sources" array with multiple entries, you MUST name the sources explicitly in the text:
+- If sources broadly agree, cite them together: "According to reports from BBC, Reuters, and France 24, ..." or end with "(...reported by [Source1](url), [Source2](url), and [Source3](url))"
+- If sources emphasize different aspects (check the "angle" field), describe each perspective by name: "BBC focused on the humanitarian toll ([BBC](url)), while Al Jazeera highlighted the diplomatic fallout ([Al Jazeera](url)) and TASS emphasized Russia's response ([TASS](url))"
+- For conflicting coverage (flagged with "conflicting": true), explicitly contrast the narratives: "Western outlets including The Guardian and Reuters reported X, while Chinese state media (China Daily, SCMP) framed the situation as Y"
+- Always link to at least 2-3 sources when multiple covered the same story — give the reader access to different perspectives
+- The goal is transparency: the reader should always know WHO is reporting WHAT, especially on geopolitically sensitive stories
 
 ## SECTION ORDER (follow this exact order)
 
@@ -129,7 +142,7 @@ Pick 3-4 notable stories from the Global South. Use sub-headers for each region.
 
 ## 📰 Editorial Picks
 
-[Select 2-3 of the best editorial/investigative articles from sources marked "editorial": true (Bellingcat, The Conversation, The Intercept, Global Voices, Carbon Brief, The Markup, OCCRP, IPS News, Mongabay, ProPublica). IMPORTANT: Pick editorials on DIFFERENT topics — do not select multiple pieces about the same subject or from the same source. Aim for topical diversity (e.g. one environment, one tech/policy, one geopolitics). For each: write 2-3 sentences summarising the core argument and why it matters, then cite the source with link. The reader should understand what the piece argues without clicking through.]
+[Select 2-3 of the best editorial/investigative articles from sources marked "editorial": true (Bellingcat, The Conversation, The Intercept, Global Voices, Carbon Brief, The Markup, ICIJ, OCCRP, IPS News, Mongabay, ProPublica). IMPORTANT: Pick editorials on DIFFERENT topics — do not select multiple pieces about the same subject or from the same source. Aim for topical diversity (e.g. one environment, one tech/policy, one geopolitics). For each: write 2-3 sentences summarising the core argument and why it matters, then cite the source with link. The reader should understand what the piece argues without clicking through.]
 
 ---
 
@@ -172,8 +185,8 @@ The story text goes here, 3-6 sentences with source citations. ([Source](url))
 Next story text here. ([Source](url))
 
 - Always cite sources as clickable markdown links: ([Source Name](url))
-- When the same story appears in multiple outlets, note that and link multiple sources
-- When stories are flagged as "conflicting", describe how different sources framed it differently
+- When a story has multiple sources in "all_sources", name each source and link to at least 2-3. Describe differing angles when present.
+- When stories are flagged as "conflicting", explicitly contrast how each named source framed the story differently
 - Focus on what matters to someone in Cyprus with ties to Poland
 - Stories about the same event should be consolidated, not repeated across sections
 - Do NOT include sports/football results unless they directly involve Poland, Cyprus, or Nepal

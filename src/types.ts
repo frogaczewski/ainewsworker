@@ -36,6 +36,7 @@ export interface TriagedStory {
   conflict_note?: string;
   editorial?: boolean;
   imageUrl?: string;
+  all_sources?: { name: string; link: string; angle?: string }[];
 }
 
 export interface WeatherLocation {
