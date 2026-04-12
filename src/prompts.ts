@@ -241,9 +241,9 @@ export function buildHeadlineEmailPrompt(fullDigest: string, websiteUrl: string)
 The email has TWO distinct tiers of content:
 
 ### Tier 1: Top Stories (prose treatment)
-Select the 5-8 most important stories from the digest. For each:
+Select the 6-10 most important stories from the digest. For each:
 - **Bold headline**
-- 1-2 sentences capturing the key facts and why it matters
+- 2-3 sentences capturing the key facts and why it matters
 - Source citation as a clickable link: ([Source](url))
 - If multiple sources covered it, name them
 
@@ -272,7 +272,7 @@ Category sub-headers to use (only include categories that have stories):
 
 ## Top Stories
 
-[5-8 stories with 1-2 sentence summaries]
+[6-10 stories with 2-3 sentence summaries]
 
 ---
 
@@ -301,7 +301,7 @@ Category sub-headers to use (only include categories that have stories):
 [Verbatim tables]
 
 ## RULES
-- Target: 600-900 words maximum
+- Target: 800-1,200 words (a 3-5 minute read)
 - The Top Stories section is the ONLY place with multi-sentence prose
 - Headlines section must be pure one-liner bullets — no paragraphs
 - Do NOT use markdown blockquote syntax (lines starting with >)
