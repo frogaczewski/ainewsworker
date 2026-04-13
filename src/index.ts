@@ -441,16 +441,8 @@ export default {
       }
     }
 
-    // Feed health check endpoint
+    // Feed health check endpoint (public, read-only)
     if (url.pathname === '/feeds/health' && request.method === 'GET') {
-      const token = url.searchParams.get('token') || request.headers.get('Authorization')?.replace('Bearer ', '');
-      if (env.TRIGGER_TOKEN && token !== env.TRIGGER_TOKEN) {
-        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
       try {
         const result = await fetchAllFeeds();
         const working = result.feedStatuses.filter(f => f.ok);
