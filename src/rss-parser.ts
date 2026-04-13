@@ -96,7 +96,7 @@ function isWithinHours(dateStr: string, hours: number): boolean {
   }
 }
 
-function parseRss2Items(xml: string, sourceName: string): RssItem[] {
+function parseRss2Items(xml: string, sourceName: string, maxAgeHours: number): RssItem[] {
   const items: RssItem[] = [];
   const itemRegex = /<item[\s>]([\s\S]*?)<\/item>/gi;
   let match;
@@ -111,7 +111,7 @@ function parseRss2Items(xml: string, sourceName: string): RssItem[] {
     const pubDate = extractTag(itemXml, 'pubDate') || extractTag(itemXml, 'dc:date');
     const imageUrl = extractImageUrl(itemXml);
 
-    if (title && isWithinHours(pubDate, 36)) {
+    if (title && isWithinHours(pubDate, maxAgeHours)) {
       items.push({
         title,
         summary: summary.slice(0, 300), // Cap summary length for token budget
@@ -126,7 +126,7 @@ function parseRss2Items(xml: string, sourceName: string): RssItem[] {
   return items;
 }
 
-function parseAtomEntries(xml: string, sourceName: string): RssItem[] {
+function parseAtomEntries(xml: string, sourceName: string, maxAgeHours: number): RssItem[] {
   const items: RssItem[] = [];
   const entryRegex = /<entry[\s>]([\s\S]*?)<\/entry>/gi;
   let match;
@@ -141,7 +141,7 @@ function parseAtomEntries(xml: string, sourceName: string): RssItem[] {
     const pubDate = extractTag(entryXml, 'published') || extractTag(entryXml, 'updated');
     const imageUrl = extractImageUrl(entryXml);
 
-    if (title && isWithinHours(pubDate, 36)) {
+    if (title && isWithinHours(pubDate, maxAgeHours)) {
       items.push({
         title,
         summary: summary.slice(0, 300),
@@ -156,13 +156,16 @@ function parseAtomEntries(xml: string, sourceName: string): RssItem[] {
   return items;
 }
 
-export function parseRssFeed(xml: string, sourceName: string): RssItem[] {
+export function parseRssFeed(xml: string, sourceName: string, editorial?: boolean): RssItem[] {
+  // Editorial/investigative sources publish infrequently — use 7-day window
+  const maxAgeHours = editorial ? 168 : 36;
+
   // Detect feed type and parse accordingly
   if (xml.includes('<entry')) {
     // Atom format (The Verge, etc.)
-    return parseAtomEntries(xml, sourceName);
+    return parseAtomEntries(xml, sourceName, maxAgeHours);
   }
 
   // RSS 2.0 / MRSS (covers most feeds including Al Arabiya MRSS)
-  return parseRss2Items(xml, sourceName);
+  return parseRss2Items(xml, sourceName, maxAgeHours);
 }

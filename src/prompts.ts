@@ -7,7 +7,7 @@ export function buildTriagePrompt(items: RssItem[]): string {
 
   return `You are a news editor for a daily digest. Your reader lives in Cyprus with ties to Poland and interests in technology, climate, science, health, and global politics.
 
-Below are headlines and summaries from ~100 news sources published in the last 24 hours. Your job:
+Below are headlines and summaries from ~90 news sources published in the last 24 hours. Your job:
 
 1. Select the 50-80 most important/interesting stories
 2. For each selected story, output a JSON object:

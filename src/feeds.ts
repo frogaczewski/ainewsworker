@@ -44,7 +44,7 @@ async function fetchSingleFeed(feed: { name: string; url: string; editorial?: bo
       }
 
       const xml = await response.text();
-      const items = parseRssFeed(xml, feed.name);
+      const items = parseRssFeed(xml, feed.name, feed.editorial);
       if (feed.editorial) {
         for (const item of items) {
           item.editorial = true;
