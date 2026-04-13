@@ -7,7 +7,7 @@ export function buildTriagePrompt(items: RssItem[]): string {
 
   return `You are a news editor for a daily digest. Your reader lives in Cyprus with ties to Poland and interests in technology, climate, science, health, and global politics.
 
-Below are headlines and summaries from ~90 news sources published in the last 24 hours. Your job:
+Below are headlines and summaries from ~80 news sources published in the last 24 hours. Your job:
 
 1. Select the 50-80 most important/interesting stories
 2. For each selected story, output a JSON object:
@@ -152,7 +152,7 @@ Prioritize stories from Central Asia, Middle East, Africa, and Latin America —
 
 ## 📰 Editorial Picks
 
-[Select 2-3 of the best editorial/investigative articles from sources marked "editorial": true (Bellingcat, The Conversation, The Intercept, Global Voices, Carbon Brief, The Markup, ICIJ, OCCRP, IPS News, Mongabay, ProPublica). IMPORTANT: Pick editorials on DIFFERENT topics — do not select multiple pieces about the same subject or from the same source. Aim for topical diversity (e.g. one environment, one tech/policy, one geopolitics). For each: write 2-3 sentences summarising the core argument and why it matters, then cite the source with link. The reader should understand what the piece argues without clicking through.]
+[Select 2-3 of the best editorial/investigative articles from sources marked "editorial": true (Bellingcat, The Conversation, The Intercept, Global Voices, Carbon Brief, The Markup, ICIJ, OCCRP, Mongabay, African Arguments, ProPublica). IMPORTANT: Pick editorials on DIFFERENT topics — do not select multiple pieces about the same subject or from the same source. Aim for topical diversity (e.g. one environment, one tech/policy, one geopolitics). For each: write 2-3 sentences summarising the core argument and why it matters, then cite the source with link. The reader should understand what the piece argues without clicking through.]
 
 ---
 

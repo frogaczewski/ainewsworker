@@ -19,24 +19,22 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'ProPublica', url: 'https://feeds.propublica.org/propublica/main', category: 'global', editorial: true },
   { name: 'Democracy Now', url: 'https://www.democracynow.org/democracynow.rss', category: 'global' },
 
-  // Middle East
+  // Middle East & Gulf
   { name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', category: 'global' },
   { name: 'Middle East Eye', url: 'https://www.middleeasteye.net/rss', category: 'global' },
-  { name: 'The National (UAE)', url: 'https://www.thenationalnews.com/arc/outboundfeeds/rss/section/world/', category: 'global' },
-  { name: 'Haaretz', url: 'https://www.haaretz.com/cmlink/1.4615971', category: 'global' },
-  { name: 'Times of Israel', url: 'https://www.timesofisrael.com/feed/', category: 'global' },
+  { name: 'Gulf News', url: 'https://gulfnews.com/rss', category: 'global' },
+  { name: 'Jerusalem Post', url: 'https://www.jpost.com/rss/rssfeedsfrontpage.aspx', category: 'global' },
 
   // Iran
-  { name: 'Tehran Times', url: 'https://www.tehrantimes.com/rss/tp/12', category: 'global' },
+  { name: 'Press TV', url: 'https://www.presstv.ir/RSS', category: 'global' },
 
-  // Saudi Arabia
-  { name: 'Arab News', url: 'https://www.arabnews.com/cat/3/rss.xml', category: 'global' },
+  // Saudi Arabia — covered by Gulf News above
 
   // Turkey
-  { name: 'TRT World', url: 'https://www.trtworld.com/rss/news', category: 'global' },
+  { name: 'Daily Sabah', url: 'https://www.dailysabah.com/rssFeed/Home', category: 'global' },
 
   // Chinese State / Perspective
-  { name: 'China Daily', url: 'https://www.chinadaily.com.cn/rss/china_rss.xml', category: 'global' },
+  { name: 'Global Times', url: 'https://www.globaltimes.cn/rss/outbrain.xml', category: 'global' },
   { name: 'SCMP', url: 'https://www.scmp.com/rss/4/feed', category: 'global' },
 
   // Russian Perspective
@@ -45,7 +43,6 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Moscow Times', url: 'https://www.themoscowtimes.com/rss/news', category: 'global' },
 
   // Ukraine
-  { name: 'Kyiv Independent', url: 'https://kyivindependent.com/rss/', category: 'global' },
   { name: 'Ukrinform', url: 'https://www.ukrinform.net/rss/block-lastnews', category: 'global' },
   { name: 'Ukrainska Pravda', url: 'https://www.pravda.com.ua/eng/rss/', category: 'global' },
 
@@ -53,9 +50,7 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Times of India', url: 'https://timesofindia.indiatimes.com/rssfeedstopstories.cms', category: 'global' },
   { name: 'The Hindu', url: 'https://www.thehindu.com/news/international/feeder/default.rss', category: 'global' },
   { name: 'Dawn (Pakistan)', url: 'https://www.dawn.com/feeds/home', category: 'global' },
-  { name: 'Scroll.in', url: 'https://scroll.in/feed', category: 'global' },
   { name: 'NDTV', url: 'https://feeds.feedburner.com/ndtvnews-top-stories', category: 'global' },
-  { name: 'The Wire', url: 'https://thewire.in/feed/', category: 'global' },
 
   // Southeast Asia
   { name: 'Bangkok Post', url: 'https://www.bangkokpost.com/rss/data/topstories.xml', category: 'global' },
@@ -65,8 +60,8 @@ export const RSS_FEEDS: RssFeedConfig[] = [
 
   // East Asia
   { name: 'Nikkei Asia', url: 'https://asia.nikkei.com/rss/feed/nar', category: 'business' },
-  { name: 'NHK World', url: 'https://www3.nhk.or.jp/nhkworld/en/news/rss.xml', category: 'global' },
-  { name: 'Korea Herald', url: 'https://www.koreaherald.com/rss/feed/rss_world.xml', category: 'global' },
+  { name: 'Japan Times', url: 'https://www.japantimes.co.jp/feed/', category: 'global' },
+  { name: 'Yonhap News', url: 'https://en.yna.co.kr/RSS/news.xml', category: 'global' },
 
   // Africa
   { name: 'Daily Maverick', url: 'https://www.dailymaverick.co.za/dmrss/', category: 'global' },
@@ -74,23 +69,19 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Nation Africa', url: 'https://nation.africa/kenya/rss.xml', category: 'global' },
   { name: 'Mail & Guardian', url: 'https://mg.co.za/feed/', category: 'global' },
   { name: 'Mada Masr', url: 'https://www.madamasr.com/en/feed/', category: 'global' },
-  { name: 'The East African', url: 'https://www.theeastafrican.co.ke/rss', category: 'global' },
-  { name: 'Addis Standard', url: 'https://addisstandard.com/feed/', category: 'global' },
+  { name: 'African Arguments', url: 'https://africanarguments.org/feed/', category: 'global', editorial: true },
 
   // Latin America
-  { name: 'Buenos Aires Times', url: 'https://www.batimes.com.ar/feed/', category: 'global' },
   { name: 'MercoPress', url: 'https://en.mercopress.com/rss', category: 'global' },
   { name: 'Tico Times', url: 'https://ticotimes.net/feed', category: 'global' },
 
   // Central Asia
   { name: 'The Diplomat', url: 'https://thediplomat.com/feed/', category: 'global' },
-  { name: 'RFE/RL Central Asia', url: 'https://www.rferl.org/api/z-vtypeti-qpp', category: 'global' },
-  { name: 'Eurasianet', url: 'https://eurasianet.org/rss.xml', category: 'global' },
+  { name: 'CABAR.asia', url: 'https://cabar.asia/en/feed', category: 'global' },
   { name: 'The Astana Times', url: 'https://astanatimes.com/feed/', category: 'global' },
 
   // Europe / EU
   { name: 'Politico EU', url: 'https://www.politico.eu/feed/', category: 'politics' },
-  { name: 'Der Spiegel Intl', url: 'https://www.spiegel.de/international/rss/index.rss', category: 'global' },
   { name: 'El País', url: 'https://feeds.elpais.com/mrss-s/pages/ep/site/english.elpais.com/portada', category: 'global' },
   { name: 'Euronews', url: 'https://www.euronews.com/rss', category: 'global' },
 
@@ -99,10 +90,9 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Rzeczpospolita', url: 'https://www.rp.pl/rss_main', category: 'poland' },
   { name: 'Notes From Poland', url: 'https://notesfrompoland.com/feed/', category: 'poland' },
 
-  // Nepal (multiple sources for redundancy)
+  // Nepal
   { name: 'Kathmandu Post', url: 'https://kathmandupost.com/rss', category: 'nepal' },
   { name: 'OnlineKhabar', url: 'https://english.onlinekhabar.com/feed', category: 'nepal' },
-  { name: 'Setopati', url: 'https://en.setopati.com/feed', category: 'nepal' },
 
   // Cyprus
   { name: 'Cyprus Mail', url: 'https://cyprus-mail.com/feed/', category: 'cyprus' },
@@ -127,7 +117,6 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'ICIJ', url: 'https://www.icij.org/feed/', category: 'editorial', editorial: true },
   { name: 'Mongabay', url: 'https://news.mongabay.com/feed/', category: 'editorial', editorial: true },
   { name: 'OCCRP', url: 'https://www.occrp.org/en/feed', category: 'editorial', editorial: true },
-  { name: 'IPS News', url: 'https://www.ipsnews.net/news/rss', category: 'editorial', editorial: true },
 ];
 
 export const WEATHER_LOCATIONS: WeatherLocation[] = [
