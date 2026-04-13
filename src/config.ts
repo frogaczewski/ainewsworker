@@ -101,7 +101,7 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Euronews', url: 'https://www.euronews.com/rss', category: 'global' },
 
   // Poland
-  { name: 'Gazeta Wyborcza', url: 'http://rss.gazeta.pl/pub/rss/gazetawyborcza_kraj.xml', category: 'poland' },
+  { name: 'Gazeta Wyborcza', url: 'https://rss.gazeta.pl/pub/rss/gazetawyborcza_kraj.xml', category: 'poland' },
   { name: 'Rzeczpospolita', url: 'https://www.rp.pl/rss_main', category: 'poland' },
   { name: 'Notes From Poland', url: 'https://notesfrompoland.com/feed/', category: 'poland' },
 
