@@ -22,7 +22,7 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   // Middle East & Gulf
   { name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', category: 'global' },
   { name: 'Middle East Eye', url: 'https://www.middleeasteye.net/rss', category: 'global' },
-  { name: 'Gulf News', url: 'https://gulfnews.com/rss', category: 'global' },
+  { name: 'Khaleej Times', url: 'https://www.khaleejtimes.com/rss', category: 'global' },
   { name: 'Jerusalem Post', url: 'https://www.jpost.com/rss/rssfeedsfrontpage.aspx', category: 'global' },
 
   // Iran
@@ -34,7 +34,7 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Daily Sabah', url: 'https://www.dailysabah.com/rssFeed/Home', category: 'global' },
 
   // Chinese State / Perspective
-  { name: 'Global Times', url: 'https://www.globaltimes.cn/rss/outbrain.xml', category: 'global' },
+  { name: 'Xinhua', url: 'http://www.news.cn/english/rss/worldnews.xml', category: 'global' },
   { name: 'SCMP', url: 'https://www.scmp.com/rss/4/feed', category: 'global' },
 
   // Russian Perspective
