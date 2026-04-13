@@ -441,6 +441,46 @@ export default {
       }
     }
 
+    // Feed health check endpoint
+    if (url.pathname === '/feeds/health' && request.method === 'GET') {
+      const token = url.searchParams.get('token') || request.headers.get('Authorization')?.replace('Bearer ', '');
+      if (env.TRIGGER_TOKEN && token !== env.TRIGGER_TOKEN) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      try {
+        const result = await fetchAllFeeds();
+        const working = result.feedStatuses.filter(f => f.ok);
+        const failing = result.feedStatuses.filter(f => !f.ok);
+
+        const response = {
+          summary: {
+            total: result.total,
+            working: working.length,
+            failing: failing.length,
+            totalItems: result.items.length,
+          },
+          working: working
+            .sort((a, b) => b.itemCount - a.itemCount)
+            .map(f => ({ name: f.name, items: f.itemCount })),
+          failing: failing.map(f => ({ name: f.name, error: f.error })),
+        };
+
+        return new Response(JSON.stringify(response, null, 2), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return new Response(JSON.stringify({ error: msg }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
     if (url.pathname === '/test-email' && request.method === 'POST') {
       try {
         await sendDigestEmail(env, '# Test Digest\n\nThis is a test email from the AI News Digest worker.\n\n---\n\n## 🌤️ Weather\n\nSunny in Cyprus, rainy in Gdańsk.\n\n| Day | Conditions | High / Low |\n|---|---|---|\n| Monday | Clear sky | 24°C / 15°C |\n| Tuesday | Partly cloudy | 22°C / 14°C |');
