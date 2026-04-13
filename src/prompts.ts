@@ -142,7 +142,7 @@ Pick 3-4 notable stories from the Global South. Use sub-headers for each region.
 
 ## 🌐 Happened in the World
 
-[One-liner bullet points for stories from countries/regions that didn't make it into the sections above. The purpose is geographic breadth — the reader should feel they've scanned the entire globe. Each bullet: one sentence + source link. Aim for 5-8 bullets covering as many different regions as possible. Examples:
+[One-liner bullet points for stories from countries/regions that didn't make it into ANY section above. CRITICAL: Do NOT repeat any story already covered elsewhere in the digest — check Global Politics, country sections, category sections, and Global South before including a story here. The purpose is geographic breadth — the reader should feel they've scanned the entire globe. Each bullet: one sentence + source link. Aim for 5-8 bullets covering as many different regions as possible. Examples:
 - **Kazakhstan**: Government approved new rare earth mining regulations. ([The Astana Times](url))
 - **Egypt**: Cairo metro expansion project receives $2B funding. ([Mada Masr](url))
 - **Iran**: Tehran announced new satellite launch timeline. ([Tehran Times](url))
@@ -198,7 +198,7 @@ Next story text here. ([Source](url))
 - When a story has multiple sources in "all_sources", name each source and link to at least 2-3. Describe differing angles when present.
 - When stories are flagged as "conflicting", explicitly contrast how each named source framed the story differently
 - Focus on what matters to someone in Cyprus with ties to Poland
-- Stories about the same event should be consolidated, not repeated across sections
+- NO DUPLICATE STORIES: A story MUST appear in exactly ONE section. If a story fits multiple sections (e.g. a Nigerian airstrike could go in Global Politics, Global South, or Happened in the World), pick the SINGLE most relevant section and do NOT mention it again elsewhere. Before writing each section, check what you have already covered.
 - Do NOT include sports/football results unless they directly involve Poland, Cyprus, or Nepal
 - Do NOT use markdown blockquote syntax (lines starting with >)
 
@@ -222,7 +222,7 @@ export function buildEmailBriefingPrompt(fullDigest: string, websiteUrl: string)
 - Keep the weather tables and markets table exactly as they are (copy verbatim)
 - REMOVE the "Also Notable" section — replace with: "**[See all stories on the website →](${websiteUrl})**"
 - Keep the "Happened in the World" section verbatim (it's already one-liners, don't shorten further)
-- For "Editorial Picks": keep the 2-3 sentence summaries from the full digest (do NOT shorten these further). Add a link after each: [Read more →](${websiteUrl})
+- For "Editorial Picks": keep the 2-3 sentence summaries from the full digest (do NOT shorten these further). Each editorial pick MUST be formatted as: **Bold Title** on its own line, blank line, then the summary text, then [Read more →](${websiteUrl}) on its own line, then a blank line before the next pick.
 - Each story MUST be its own paragraph, separated by a blank line
 - Add at the very top (before the title): *[Read the full digest online →](${websiteUrl})*
 - Target: 1,000-1,500 words maximum
@@ -288,7 +288,7 @@ Category sub-headers to use (only include categories that have stories):
 ---
 
 ## 📰 Editorial Picks
-[Full summaries from digest, not shortened]
+[Full summaries from digest, not shortened. Each pick: **Bold Title** on its own line, blank line, summary text, blank line before next pick.]
 
 ---
 
@@ -304,6 +304,7 @@ Category sub-headers to use (only include categories that have stories):
 - Target: 800-1,200 words (a 3-5 minute read)
 - The Top Stories section is the ONLY place with multi-sentence prose
 - Headlines section must be pure one-liner bullets — no paragraphs
+- NO DUPLICATE STORIES: Every story appears ONCE — either in Top Stories or Headlines, never both. If a story was placed in Top Stories, do NOT repeat it as a headline.
 - Do NOT use markdown blockquote syntax (lines starting with >)
 - Preserve all markdown formatting: headers, bold, links, tables, horizontal rules
 - Every story from the full digest should appear somewhere (either Top Stories or Headlines) — don't drop stories, just compress them to headlines
