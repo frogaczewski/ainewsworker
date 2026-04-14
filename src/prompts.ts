@@ -9,7 +9,7 @@ export function buildTriagePrompt(items: RssItem[]): string {
 
 Below are headlines and summaries from ~80 news sources published in the last 24 hours. Your job:
 
-1. Select the 50-80 most important/interesting stories
+1. Select the 60-90 most important/interesting stories
 2. For each selected story, output a JSON object:
    {
      "headline": "original headline",
@@ -17,7 +17,7 @@ Below are headlines and summaries from ~80 news sources published in the last 24
      "source": "source name",
      "link": "original article URL",
      "country_tags": ["PL", "CY", "US", ...],
-     "category_tags": ["tech_ai", "climate", "politics", "science", "business", "health"],
+     "category_tags": ["tech_ai", "climate", "politics", "science", "business", "health", "sports", "culture", "economics"],
      "importance": "high" | "medium",
      "duplicate_of": null or index of earlier story covering same event,
      "conflicting": false,
@@ -47,7 +47,12 @@ Below are headlines and summaries from ~80 news sources published in the last 24
 6. Deprioritize:
    - Celebrity gossip, entertainment unless truly major
    - Local crime stories with no broader significance
-   - Sports unless a major international event
+
+7. Sports: INCLUDE top results/scores from major leagues and tournaments worldwide (Champions League, Premier League, La Liga, Bundesliga, NBA, F1, Grand Slams, cricket, Olympics, etc.) and any notable upsets or milestones. Tag as "sports". Aim for 8-12 sports items.
+
+8. Culture & Arts: INCLUDE notable cultural events, exhibitions, film/music releases, literary awards, theater, and cultural news. Prioritize Polish culture stories from Culture.pl alongside worldwide cultural highlights. Tag as "culture". Aim for 5-8 culture items.
+
+9. Economics & Macro: INCLUDE inflation readings (CPI, PPI), central bank rate decisions, GDP figures, employment data, trade balance reports, and institutional economic forecasts (IMF, World Bank, ECB). Tag as "economics". These will feed into the Markets & Macro section.
 
 Polish-language and Nepali-language items: translate the headline and summary to English in your output.
 
@@ -156,13 +161,48 @@ Prioritize stories from Central Asia, Middle East, Africa, and Latin America —
 
 ---
 
-## 📈 Markets & Currencies
+## ⚽ Sports
+
+[One-liner bullet points for major sports results from the last 24 hours. WORLDWIDE coverage — not limited to European football. Each bullet should be a single sentence with the key result/score. Format:
+- **Champions League**: Barcelona 2-1 PSG in semi-final first leg. ([BBC Sport](url))
+- **Premier League**: Arsenal 3-0 Chelsea, moving to top of table. ([Sky Sports](url))
+- **NBA**: Lakers beat Celtics 112-108 in overtime. ([ESPN](url))
+- **F1**: Verstappen wins Australian Grand Prix. ([The Guardian](url))
+- **Tennis**: Djokovic advances to Roland Garros quarter-finals. ([Marca](url))
+Cover: football (Champions League, Premier League, La Liga, Bundesliga, Serie A, Ekstraklasa), tennis (Grand Slams), F1, NBA, cricket, cycling, Olympics/major tournaments. Aim for 6-10 bullets. Bold the competition/league name at the start of each bullet. If no notable sports results exist for a day, write "No major results today."]
+
+---
+
+## 🎭 Culture
+
+[One-liner bullet points covering Polish and worldwide cultural news. Each bullet: one sentence + source link. Format:
+- **Polish culture**: New exhibition at POLIN Museum explores interwar avant-garde. ([Culture.pl](url))
+- **Film**: Cannes announces Official Selection lineup for 2026. ([The Guardian](url))
+- **Music**: Radiohead announce reunion world tour. ([BBC Culture](url))
+- **Art**: Banksy mural discovered in London warehouse. ([Artnet](url))
+ALWAYS include at least 1-2 Polish culture items if available from Culture.pl or Polish sources. Aim for 4-7 bullets total. If no notable cultural news exists, write "No major cultural stories today."]
+
+---
+
+## 📈 Markets & Macro
 
 | Index / Asset | Value | Change |
 |---|---|---|
 [MARKET_DATA_HERE]
 
-[Add 1-2 sentences of market commentary below the table]
+**Market Commentary**
+
+[1-2 sentences explaining what drove markets today]
+
+**Macro & Inflation Watch**
+
+[Write 3-5 sentences covering the most significant macroeconomic developments from the last 24 hours. Focus on:
+- Inflation readings (CPI, PPI) from major economies — cite the actual numbers and compare to expectations or previous readings
+- Central bank rate decisions or policy signals (Fed, ECB, BoE, BoJ, etc.)
+- GDP, employment, trade balance, or PMI data releases
+- IMF/World Bank forecasts or warnings
+- Notable economic policy changes (tariffs, sanctions, fiscal packages)
+If no major macro data was released today, briefly note what's coming up this week (e.g., "US CPI due Thursday, ECB meeting next week"). Always cite sources with links.]
 
 ---
 
@@ -182,7 +222,7 @@ Prioritize stories from Central Asia, Middle East, Africa, and Latin America —
 *Generated automatically by AI News Digest. [Read the full digest online.](https://ainewsworker.rogaczewski-dev.workers.dev/)*
 
 ## GUIDELINES
-- Target approximately 2,500-3,500 words for the entire digest
+- Target approximately 2,800-3,800 words for the entire digest
 - Each story: 3-6 sentences, comprehensive enough that the reader never needs to click through
 - CRITICAL FORMATTING: Each story MUST start with a **bold headline** on its own line, followed by a blank line, then the story text. Stories MUST be separated by a blank line. Example:
 
@@ -199,7 +239,6 @@ Next story text here. ([Source](url))
 - When stories are flagged as "conflicting", explicitly contrast how each named source framed the story differently
 - Focus on what matters to someone in Cyprus with ties to Poland
 - NO DUPLICATE STORIES: A story MUST appear in exactly ONE section. If a story fits multiple sections (e.g. a Nigerian airstrike could go in Global Politics, Global South, or Happened in the World), pick the SINGLE most relevant section and do NOT mention it again elsewhere. Before writing each section, check what you have already covered.
-- Do NOT include sports/football results unless they directly involve Poland, Cyprus, or Nepal
 - Do NOT use markdown blockquote syntax (lines starting with >)
 
 === TRIAGED STORIES ===
@@ -222,6 +261,9 @@ export function buildEmailBriefingPrompt(fullDigest: string, websiteUrl: string)
 - Keep the weather tables and markets table exactly as they are (copy verbatim)
 - REMOVE the "Also Notable" section — replace with: "**[See all stories on the website →](${websiteUrl})**"
 - Keep the "Happened in the World" section verbatim (it's already one-liners, don't shorten further)
+- Keep the "Sports" section verbatim (it's already one-liners, don't shorten further)
+- Keep the "Culture" section verbatim (it's already one-liners, don't shorten further)
+- Keep the "Markets & Macro" section verbatim — preserve the table, market commentary, and macro & inflation watch
 - For "Editorial Picks": keep the 2-3 sentence summaries from the full digest (do NOT shorten these further). Each editorial pick MUST be formatted as: **Bold Title** on its own line, blank line, then the summary text, then [Read more →](${websiteUrl}) on its own line, then a blank line before the next pick.
 - Each story MUST be its own paragraph, separated by a blank line
 - Add at the very top (before the title): *[Read the full digest online →](${websiteUrl})*
@@ -254,7 +296,7 @@ Group ALL remaining stories under bold category sub-headers. Each story is ONE b
 - **Bold headline** — single-clause summary. ([Source](url))
 
 Category sub-headers to use (only include categories that have stories):
-**Global Politics** | **Poland** | **Cyprus** | **Nepal** | **Europe** | **Americas** | **Asia** | **Africa & Middle East** | **Technology** | **Climate** | **Science** | **Business** | **Health**
+**Global Politics** | **Poland** | **Cyprus** | **Nepal** | **Europe** | **Americas** | **Asia** | **Africa & Middle East** | **Technology** | **Climate** | **Science** | **Business** | **Health** | **Sports** | **Culture**
 
 ### Other sections
 - "Happened in the World" — keep verbatim from the full digest (already one-liners)
@@ -292,8 +334,18 @@ Category sub-headers to use (only include categories that have stories):
 
 ---
 
-## 📈 Markets & Currencies
-[Verbatim table]
+## ⚽ Sports
+[Verbatim from full digest — already one-liners]
+
+---
+
+## 🎭 Culture
+[Verbatim from full digest — already one-liners]
+
+---
+
+## 📈 Markets & Macro
+[Verbatim table and macro commentary]
 
 ---
 
