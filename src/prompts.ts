@@ -42,7 +42,7 @@ Below are headlines and summaries from ~80 news sources published in the last 24
    - Climate and environment
    - Science breakthroughs
    - Stories appearing across multiple sources (higher credibility)
-   - MUST INCLUDE: At least 1 story each from Africa, Latin America, Central Asia, and South/Southeast Asia — prioritize stories told from local perspectives, not just Western coverage of those regions
+   - MUST INCLUDE: At least 1 story each from Africa, Latin America, Central Asia, and South/Southeast Asia — prioritize stories told from local perspectives, not just Western coverage of those regions. Within Africa, give priority to the Sudan conflict — it is one of the world's worst ongoing humanitarian crises and is severely underreported; always include a Sudan update if one exists in the feed.
 
 6. Deprioritize:
    - Celebrity gossip, entertainment unless truly major
@@ -131,6 +131,8 @@ For other individual countries: ONLY create a dedicated section if they have a t
 ## 🌏 Global South & Regional Roundup
 
 Pick 3-4 notable stories from the Global South. Use sub-headers for each region. Only include regions with actual stories. Use correct geography: Haiti = Caribbean/Latin America (NOT Africa), Pakistan = South Asia, India = South Asia, China/Japan = East Asia (NOT Global South). These should be stories told from local perspectives.
+
+**Sudan conflict gets priority within the Africa sub-section.** The war in Sudan is one of the world's largest humanitarian crises and receives far less coverage than it deserves. If there are any Sudan conflict updates — fighting, displacement, aid blockages, famine, atrocities — lead with them in the Africa sub-section. This does not need the same depth as Ukraine or Iran coverage, but it should be present whenever there is something to report.
 
 ---
 

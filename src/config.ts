@@ -70,6 +70,7 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Mail & Guardian', url: 'https://mg.co.za/feed/', category: 'global' },
   { name: 'Mada Masr', url: 'https://www.madamasr.com/en/feed/', category: 'global' },
   { name: 'African Arguments', url: 'https://africanarguments.org/feed/', category: 'global', editorial: true },
+  { name: 'Radio Dabanga', url: 'https://www.dabangasudan.org/en/all-news/feed', category: 'global' },
 
   // Latin America
   { name: 'MercoPress', url: 'https://en.mercopress.com/rss', category: 'global' },
