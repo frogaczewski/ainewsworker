@@ -118,6 +118,26 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'ICIJ', url: 'https://www.icij.org/feed/', category: 'editorial', editorial: true },
   { name: 'Mongabay', url: 'https://news.mongabay.com/feed/', category: 'editorial', editorial: true },
   { name: 'OCCRP', url: 'https://www.occrp.org/en/feed', category: 'editorial', editorial: true },
+
+  // Sports — Worldwide
+  { name: 'BBC Sport', url: 'https://feeds.bbci.co.uk/sport/rss.xml', category: 'sports' },
+  { name: 'ESPN', url: 'https://www.espn.com/espn/rss/news', category: 'sports' },
+  { name: 'Sky Sports', url: 'https://www.skysports.com/rss/12040', category: 'sports' },
+  { name: 'The Guardian Sport', url: 'https://www.theguardian.com/uk/sport/rss', category: 'sports' },
+  { name: 'Marca English', url: 'https://www.marca.com/en/rss/portada.xml', category: 'sports' },
+
+  // Culture — Polish & Worldwide
+  { name: 'BBC Culture', url: 'https://www.bbc.com/culture/feed.rss', category: 'culture' },
+  { name: 'The Guardian Culture', url: 'https://www.theguardian.com/culture/rss', category: 'culture' },
+  { name: 'Artnet News', url: 'https://news.artnet.com/feed', category: 'culture' },
+  { name: 'Culture.pl', url: 'https://culture.pl/en/rss.xml', category: 'culture' },
+
+  // Economics & Macro
+  { name: 'Reuters Business', url: 'https://www.reutersagency.com/feed/?best-topics=business-finance', category: 'economics' },
+  { name: 'ECB Press', url: 'https://www.ecb.europa.eu/rss/press.html', category: 'economics' },
+  { name: 'Fed News', url: 'https://www.federalreserve.gov/feeds/press_all.xml', category: 'economics' },
+  { name: 'IMF News', url: 'https://www.imf.org/en/News/Rss', category: 'economics' },
+  { name: 'World Bank', url: 'https://www.worldbank.org/en/news/all/rss.xml', category: 'economics' },
 ];
 
 export const WEATHER_LOCATIONS: WeatherLocation[] = [
@@ -140,7 +160,7 @@ export const CURRENCY_PAIRS: CurrencyPair[] = [
 
 export const COUNTRIES_OF_INTEREST = ['PL', 'CY', 'NP', 'UA', 'CN', 'DE', 'FR', 'IT', 'ES', 'GB', 'US', 'EU'];
 
-export const CATEGORIES = ['tech_ai', 'climate', 'politics', 'science', 'business', 'health'];
+export const CATEGORIES = ['tech_ai', 'climate', 'politics', 'science', 'business', 'health', 'sports', 'culture', 'economics'];
 
 export const EMAIL_FROM = { email: 'ainews@rogaczewski.me', name: 'AI News Digest' };
 export const EMAIL_TO = { email: 'frogaczewski@gmail.com', name: 'Filip Rogaczewski' };

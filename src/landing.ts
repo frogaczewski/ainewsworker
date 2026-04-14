@@ -31,7 +31,7 @@ interface DigestSection {
 
 // Keywords to classify sections into columns
 const LEFT_KEYWORDS = ['poland', 'cyprus', 'nepal', 'ukraine', 'europe', 'brics', 'major powers', 'global south', 'roundup', 'regional', 'science', 'research', 'climate', 'environment', 'health'];
-const RIGHT_KEYWORDS = ['editorial', 'deep dive', 'analysis', 'opinion', 'also notable', 'notable', 'markets', 'currencies', 'weather', 'forecast'];
+const RIGHT_KEYWORDS = ['editorial', 'deep dive', 'analysis', 'opinion', 'also notable', 'notable', 'markets', 'currencies', 'macro', 'weather', 'forecast', 'sports', 'culture'];
 // Everything else goes center (politics, tech, business, etc.)
 
 type Column = 'left' | 'center' | 'right';
