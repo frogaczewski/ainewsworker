@@ -84,7 +84,10 @@ function buildFeedStatusFooter(feedStatuses?: FeedStatus[]): string {
   return html;
 }
 
-function wrapInEmailTemplate(body: string, feedStatusHtml: string): string {
+function wrapInEmailTemplate(body: string, feedStatusHtml: string, greeting?: string): string {
+  const greetingHtml = greeting
+    ? `<p style="font-size:17px;color:#5C4A3A;margin:0 0 24px 0">${greeting}</p>`
+    : '';
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>
 body{font-family:Garamond,'EB Garamond','Times New Roman',Georgia,serif;line-height:1.7;color:#2D2A26;max-width:720px;margin:0 auto;padding:20px;background:#F7F3EE}
@@ -99,7 +102,7 @@ td{padding:8px 14px;border-bottom:1px solid #DDD5CA}
 tr:nth-child(even){background:#F0EBE3}
 ul{padding-left:20px}li{margin:4px 0}a{color:#9B4D3A;text-decoration:underline}
 blockquote{border-left:4px solid #D4835E;margin:12px 0;padding:8px 16px;background:#FAF5EF;color:#5C4A3A}
-</style></head><body>${body}${feedStatusHtml}</body></html>`;
+</style></head><body>${greetingHtml}${body}${feedStatusHtml}</body></html>`;
 }
 
 export async function sendDigestEmail(
@@ -109,9 +112,14 @@ export async function sendDigestEmail(
   recipient?: { email: string; name: string },
   subjectOverride?: string,
 ): Promise<void> {
+  const to = recipient ?? EMAIL_TO;
+
   const htmlBody = markdownToHtml(markdown);
   const feedStatusHtml = buildFeedStatusFooter(feedStatuses);
-  const htmlFull = wrapInEmailTemplate(htmlBody, feedStatusHtml);
+  const firstName = to.name.split(' ')[0];
+  const isPolish = subjectOverride?.includes('Codzienny') ?? false;
+  const greeting = isPolish ? `☕ Dzień dobry, ${firstName}!` : `☕ Good morning, ${firstName}!`;
+  const htmlFull = wrapInEmailTemplate(htmlBody, feedStatusHtml, greeting);
 
   const today = new Date();
   const subject = subjectOverride ?? `Daily News Digest — ${today.toLocaleDateString('en-GB', {
@@ -121,7 +129,6 @@ export async function sendDigestEmail(
     year: 'numeric',
   })}`;
 
-  const to = recipient ?? EMAIL_TO;
 
   const payload = {
     Messages: [{

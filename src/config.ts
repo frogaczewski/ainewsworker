@@ -146,13 +146,24 @@ export const EMAIL_FROM = { email: 'ainews@rogaczewski.me', name: 'AI News Diges
 export const EMAIL_TO = { email: 'frogaczewski@gmail.com', name: 'Filip Rogaczewski' };
 export const EMAIL_TO_PL = [
   { email: 'jarrog@gmail.com', name: 'Jarosław Rogaczewski' },
-  { email: 'adytczew@o2.pl', name: 'Adytczew' },
+  { email: 'adytczew@o2.pl', name: 'Adam Dulak' },
   { email: 'bartek.szajkowski@gmail.com', name: 'Bartek Szajkowski' },
-  { email: 'enterbios@gmail.com', name: 'Enterbios' },
+  { email: 'enterbios@gmail.com', name: 'Arkadiusz Głowacki' },
   { email: 'mail@danielturczanski.com', name: 'Daniel Turczański' },
   { email: 'konradlazarski@gmail.com', name: 'Konrad Łazarski' },
   { email: 'Robert.sakowski@lifein.pl', name: 'Robert Sakowski' },
   { email: 'frogaczewski@gmail.com', name: 'Filip Rogaczewski' },
+  { email: 'p.konczakowski@wp.pl', name: 'Przemysław Kończakowski' },
+  { email: 'tszajkowski@wp.pl', name: 'Tomasz Szajkowski' },
+  { email: 'madlenaszajkowska@gmail.com', name: 'Madlena Szajkowska' },
+  { email: 'jacek@gorcz.pl', name: 'Jacek Gorcz' },
+  { email: 'odyapiotr@gmail.com', name: 'Piotr Odya' },
+  { email: 'pawel.czapski.pruszak@gmail.com', name: 'Paweł Czapski Pruszak' },
+  { email: 'radca.bronk@gmail.com', name: 'Tomasz Bronk' },
+  { email: 'lukaszkakoltcz@gmail.com', name: 'Łukasz Kakol' },
+  { email: 'tozwa@op.pl', name: 'Tomasz Zwara' },
+  { email: 'mabugajewski@gmail.com', name: 'Mariusz Bugajewski' },
+  { email: 'dorrog1@gmail.com', name: 'Dorota Rogaczewska' },
 ];
 
 export const WMO_WEATHER_CODES: Record<number, string> = {
