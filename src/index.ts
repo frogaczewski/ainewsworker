@@ -373,17 +373,8 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // Manual trigger endpoint
+    // Manual trigger endpoint (no auth required)
     if (url.pathname === '/run' && request.method === 'POST') {
-      // Simple auth: require ?token=<TRIGGER_TOKEN> or Authorization header
-      const token = url.searchParams.get('token') || request.headers.get('Authorization')?.replace('Bearer ', '');
-      if (env.TRIGGER_TOKEN && token !== env.TRIGGER_TOKEN) {
-        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
       // Run synchronously — the response keeps the connection open, giving us
       // the full wall-clock allowance. Streaming LLM calls keep it alive.
       const dryRun = url.searchParams.get('dry') === 'true';
