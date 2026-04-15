@@ -92,29 +92,19 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.log(`[Pipeline] Haiku triage failed: ${errMsg}`);
-    console.log(`[Pipeline] Retrying once...`);
-    try {
-      const triagePrompt = buildTriagePrompt(sortedItems);
-      const triageResponse = await callHaiku(env, triagePrompt);
-      triagedStories = parseTriageResponse(triageResponse);
-      console.log(`[Pipeline] Triage retry selected ${triagedStories.length} stories`);
-    } catch (retryErr) {
-      const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-      console.log(`[Pipeline] Haiku retry also failed: ${retryMsg}`);
-      console.log(`[Pipeline] Falling back to raw items for Sonnet`);
-      triagedStories = sortedItems.slice(0, 100).map(item => ({
-        headline: item.title,
-        summary: item.summary,
-        source: item.source,
-        link: item.link,
-        country_tags: [],
-        category_tags: [],
-        importance: 'medium' as const,
-        duplicate_of: null,
-        editorial: item.editorial,
-        ...(item.imageUrl && { imageUrl: item.imageUrl }),
-      }));
-    }
+    console.log(`[Pipeline] Falling back to raw items for Sonnet`);
+    triagedStories = sortedItems.slice(0, 100).map(item => ({
+      headline: item.title,
+      summary: item.summary,
+      source: item.source,
+      link: item.link,
+      country_tags: [],
+      category_tags: [],
+      importance: 'medium' as const,
+      duplicate_of: null,
+      editorial: item.editorial,
+      ...(item.imageUrl && { imageUrl: item.imageUrl }),
+    }));
   }
 
   // Carry over imageUrl from RSS items to triaged stories (Haiku doesn't return it)
@@ -170,24 +160,13 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   console.log('[Pipeline] Step 5a: Compiling full digest with Sonnet...');
   let fullDigest: string;
 
-  try {
-    const compilationPrompt = buildCompilationPrompt(
-      triagedStories,
-      weather,
-      markets,
-      { total: feedResult.total, failed: feedResult.failed },
-    );
-    fullDigest = await callSonnet(env, compilationPrompt);
-  } catch (err) {
-    console.log('[Pipeline] Sonnet compilation failed, retrying once...');
-    const compilationPrompt = buildCompilationPrompt(
-      triagedStories,
-      weather,
-      markets,
-      { total: feedResult.total, failed: feedResult.failed },
-    );
-    fullDigest = await callSonnet(env, compilationPrompt);
-  }
+  const compilationPrompt = buildCompilationPrompt(
+    triagedStories,
+    weather,
+    markets,
+    { total: feedResult.total, failed: feedResult.failed },
+  );
+  fullDigest = await callSonnet(env, compilationPrompt);
 
   console.log(`[Pipeline] Full digest compiled (${fullDigest.length} characters)`);
 
@@ -196,12 +175,7 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   const websiteUrl = 'https://ainewsworker.rogaczewski-dev.workers.dev';
   let emailBriefing: string;
 
-  try {
-    emailBriefing = await callSonnet(env, buildEmailBriefingPrompt(fullDigest, websiteUrl));
-  } catch (err) {
-    console.log('[Pipeline] Email briefing failed, retrying once...');
-    emailBriefing = await callSonnet(env, buildEmailBriefingPrompt(fullDigest, websiteUrl));
-  }
+  emailBriefing = await callSonnet(env, buildEmailBriefingPrompt(fullDigest, websiteUrl));
 
   console.log(`[Pipeline] Email briefing compiled (${emailBriefing.length} characters)`);
 
@@ -270,14 +244,9 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   try {
     polishBriefing = await callSonnet(env, buildTranslationPrompt(emailBriefing));
   } catch (err) {
-    console.log('[Pipeline] Polish translation failed, retrying once...');
-    try {
-      polishBriefing = await callSonnet(env, buildTranslationPrompt(emailBriefing));
-    } catch (retryErr) {
-      const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-      console.log(`[Pipeline] Polish translation retry also failed: ${retryMsg}`);
-      polishBriefing = '';
-    }
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`[Pipeline] Polish translation failed, skipping: ${msg}`);
+    polishBriefing = '';
   }
 
   console.log(`[Pipeline] Polish translation: ${polishBriefing.length} characters`);
