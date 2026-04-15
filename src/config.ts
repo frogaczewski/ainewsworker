@@ -69,12 +69,18 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'Nation Africa', url: 'https://nation.africa/kenya/rss.xml', category: 'global' },
   { name: 'Mail & Guardian', url: 'https://mg.co.za/feed/', category: 'global' },
   { name: 'Mada Masr', url: 'https://www.madamasr.com/en/feed/', category: 'global' },
+  { name: 'Premium Times', url: 'https://www.premiumtimesng.com/feed', category: 'global' },
+  { name: 'The Punch', url: 'https://punchng.com/feed/', category: 'global' },
   { name: 'African Arguments', url: 'https://africanarguments.org/feed/', category: 'global', editorial: true },
   { name: 'Radio Dabanga', url: 'https://www.dabangasudan.org/en/all-news/feed', category: 'global' },
 
   // Latin America
   { name: 'MercoPress', url: 'https://en.mercopress.com/rss', category: 'global' },
   { name: 'Tico Times', url: 'https://ticotimes.net/feed', category: 'global' },
+  { name: 'Infobae', url: 'https://www.infobae.com/feeds/rss/', category: 'global' },
+  { name: 'O Globo', url: 'https://oglobo.globo.com/rss/oglobo.xml', category: 'global' },
+  { name: 'CIPER Chile', url: 'https://www.ciperchile.cl/feed/', category: 'global', editorial: true },
+  { name: 'El País América', url: 'https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/america/portada', category: 'global' },
 
   // Central Asia
   { name: 'The Diplomat', url: 'https://thediplomat.com/feed/', category: 'global' },
@@ -107,6 +113,10 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   // Science
   { name: 'Science Daily', url: 'https://www.sciencedaily.com/rss/all.xml', category: 'science' },
   { name: 'Nature News', url: 'https://www.nature.com/nature.rss', category: 'science' },
+
+  // Health
+  { name: 'STAT News', url: 'https://www.statnews.com/feed/', category: 'health' },
+  { name: 'WHO News', url: 'https://www.who.int/rss-feeds/news-english.xml', category: 'health' },
 
   // Editorial / Investigative / Open-Source (non-paywalled)
   { name: 'Bellingcat', url: 'https://www.bellingcat.com/feed/', category: 'editorial', editorial: true },

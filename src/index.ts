@@ -251,8 +251,8 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     polishBriefing = await callSonnet(env, buildTranslationPrompt(emailBriefing));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.log(`[Pipeline] Polish translation failed, skipping: ${msg}`);
-    polishBriefing = '';
+    console.log(`[Pipeline] Polish translation failed, falling back to English: ${msg}`);
+    polishBriefing = `> **Uwaga:** Automatyczne tłumaczenie było dziś niedostępne. Poniżej wersja angielska.\n\n---\n\n${emailBriefing}`;
   }
 
   console.log(`[Pipeline] Polish translation: ${polishBriefing.length} characters`);
