@@ -24,7 +24,7 @@ export function markdownToHtml(md: string): string {
     // Unordered list items
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     // Links
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#9B4D3A">$1</a>');
 
   // Wrap consecutive <li> in <ul>
   html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');

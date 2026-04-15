@@ -220,11 +220,24 @@ export function buildEmailBriefingPrompt(fullDigest: string, websiteUrl: string)
 - After each section, add a link: [Read full coverage →](${websiteUrl})
 - Keep the title, date line, and compiled-from note exactly as they are
 - Keep the weather tables and markets table exactly as they are (copy verbatim)
-- REMOVE the "Also Notable" section — replace with: "**[See all stories on the website →](${websiteUrl})**"
+- REMOVE the "Also Notable" section entirely
 - Keep the "Happened in the World" section verbatim (it's already one-liners, don't shorten further)
-- For "Editorial Picks": keep the 2-3 sentence summaries from the full digest (do NOT shorten these further). Each editorial pick MUST be formatted as: **Bold Title** on its own line, blank line, then the summary text, then [Read more →](${websiteUrl}) on its own line, then a blank line before the next pick.
+- For "Editorial Picks": keep the 2-3 sentence summaries from the full digest (do NOT shorten these further). Each editorial pick MUST be formatted exactly like this (note the blank lines):
+
+**Bold Title**
+
+Summary text here, 2-3 sentences. ([Source](url))
+
+[Read more →](${websiteUrl})
+
+**Next Bold Title**
+
+Next summary text. ([Source](url))
+
+[Read more →](${websiteUrl})
 - Each story MUST be its own paragraph, separated by a blank line
 - Add at the very top (before the title): *[Read the full digest online →](${websiteUrl})*
+- Add at the very bottom (after weather, as the last line): **[See all stories on the website →](${websiteUrl})**
 - Target: 1,000-1,500 words maximum
 - Do NOT use markdown blockquote syntax (lines starting with >)
 - Preserve all markdown formatting: headers, bold, links, tables, horizontal rules
@@ -260,7 +273,7 @@ Category sub-headers to use (only include categories that have stories):
 - "Happened in the World" — keep verbatim from the full digest (already one-liners)
 - "Editorial Picks" — keep the 2-3 sentence summaries from the full digest (do NOT shorten)
 - Markets table and Weather tables — copy verbatim
-- REMOVE "Also Notable" — replace with: **[See all stories on the website →](${websiteUrl})**
+- REMOVE "Also Notable" entirely
 
 ## STRUCTURE
 
@@ -299,6 +312,10 @@ Category sub-headers to use (only include categories that have stories):
 
 ## 🌤️ Weather Forecast
 [Verbatim tables]
+
+---
+
+**[See all stories on the website →](${websiteUrl})**
 
 ## RULES
 - Target: 800-1,200 words (a 3-5 minute read)

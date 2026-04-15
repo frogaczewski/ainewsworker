@@ -8,6 +8,12 @@ import { EMAIL_TO, EMAIL_TO_PL } from './config';
 import { buildLandingPage, buildStoryPage, generateSlug } from './landing';
 import type { Env, TriagedStory, FeedStatus, DigestData } from './types';
 
+function greetedMarkdown(markdown: string, recipientName: string, polish: boolean): string {
+  const firstName = recipientName.split(' ')[0];
+  const greeting = polish ? `Dzień dobry, ${firstName}!` : `Good morning, ${firstName}!`;
+  return `${greeting}\n\n${markdown}`;
+}
+
 /**
  * Replace generic website links in the email briefing with proper /story/{date}/{slug} links.
  * Finds each "Read ... →" link pointing to the base websiteUrl, looks at the nearest
@@ -229,9 +235,9 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   // Test mode: send only English emails to Filip, skip Polish
   if (opts.testMode) {
     console.log('[Pipeline] Test mode — sending emails only to Filip...');
-    await sendDigestEmail(env, emailBriefing);
+    await sendDigestEmail(env, greetedMarkdown(emailBriefing, EMAIL_TO.name, false));
     if (headlineEmail) {
-      await sendDigestEmail(env, headlineEmail, undefined, EMAIL_TO, `[NEW] Daily News Digest — ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}`);
+      await sendDigestEmail(env, greetedMarkdown(headlineEmail, EMAIL_TO.name, false), undefined, EMAIL_TO, `[NEW] Daily News Digest — ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}`);
     }
     console.log('[Pipeline] Test mode complete');
     return 'test-success';
@@ -270,16 +276,16 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   });
 
   const emailTasks: Promise<void>[] = [
-    sendDigestEmail(env, emailBriefing).catch(async () => {
+    sendDigestEmail(env, greetedMarkdown(emailBriefing, EMAIL_TO.name, false)).catch(async () => {
       console.log('[Pipeline] English email failed, retrying once...');
-      await sendDigestEmail(env, emailBriefing);
+      await sendDigestEmail(env, greetedMarkdown(emailBriefing, EMAIL_TO.name, false));
     }),
   ];
 
   // A/B test: send headline-format email only to Filip
   if (headlineEmail) {
     emailTasks.push(
-      sendDigestEmail(env, headlineEmail, undefined, EMAIL_TO, `[NEW] Daily News Digest — ${enDateStr}`).catch((err) => {
+      sendDigestEmail(env, greetedMarkdown(headlineEmail, EMAIL_TO.name, false), undefined, EMAIL_TO, `[NEW] Daily News Digest — ${enDateStr}`).catch((err) => {
         console.log(`[Pipeline] Headline test email failed: ${err}`);
       }),
     );
@@ -288,9 +294,9 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   if (polishBriefing) {
     for (const plRecipient of EMAIL_TO_PL) {
       emailTasks.push(
-        sendDigestEmail(env, polishBriefing, undefined, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`).catch(async () => {
+        sendDigestEmail(env, greetedMarkdown(polishBriefing, plRecipient.name, true), undefined, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`).catch(async () => {
           console.log(`[Pipeline] Polish email to ${plRecipient.email} failed, retrying once...`);
-          await sendDigestEmail(env, polishBriefing, undefined, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`);
+          await sendDigestEmail(env, greetedMarkdown(polishBriefing, plRecipient.name, true), undefined, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`);
         }),
       );
     }
