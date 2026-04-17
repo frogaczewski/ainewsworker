@@ -26,10 +26,10 @@ Below are headlines and summaries from ~80 news sources published in the last 24
      "all_sources": [{"name": "Source Name", "link": "url", "angle": "brief perspective note or null"}]
    }
 
-3. MULTI-SOURCE TRACKING (CRITICAL): When the same event appears in multiple sources:
-   - Keep the FIRST occurrence as the primary entry with full details
-   - On the PRIMARY entry, populate "all_sources" with EVERY source that covered this event — include the source name, link, and a brief note on their angle/perspective (e.g., "focuses on civilian casualties", "emphasizes economic impact", "reports government position"). Set angle to null if the coverage is essentially identical.
-   - On DUPLICATE entries, set "duplicate_of" to the index of the primary entry
+3. MULTI-SOURCE TRACKING (CRITICAL): "all_sources" is REQUIRED on every story you keep — never empty, never null.
+   - For SINGLE-source stories: put one entry in all_sources — the source you're reading, with its link and angle set to null. This is the fallback so the compilation step always has something to cite by name.
+   - For MULTI-source stories (same event in multiple feeds): keep the FIRST occurrence as the primary entry with full details, and on that primary entry populate "all_sources" with EVERY source that covered the event — name, link, and a brief angle note (e.g., "focuses on civilian casualties", "emphasizes economic impact", "reports government position"). Set angle to null if coverage is essentially identical.
+   - On DUPLICATE entries, set "duplicate_of" to the index of the primary entry.
    - This is essential — the compilation step needs to know which sources reported each story so it can cite them by name and describe their differing perspectives.
 
 4. CONFLICTING REPORTS: When sources report the same event with different framing, different facts, or contradictory narratives (e.g., Western vs non-Western media, right-wing vs left-wing outlets, global south vs developed world perspectives), set "conflicting": true and provide a brief "conflict_note" explaining the key difference (e.g., "Western sources emphasize sanctions impact, while Xinhua focuses on diplomatic overtures"). Also ensure all_sources captures each source's specific angle.
@@ -44,11 +44,12 @@ Below are headlines and summaries from ~80 news sources published in the last 24
    - Stories appearing across multiple sources (higher credibility)
    - MUST INCLUDE: At least 1 story each from Africa, Latin America, Central Asia, and South/Southeast Asia — prioritize stories told from local perspectives, not just Western coverage of those regions. Within Africa, give priority to the Sudan conflict — it is one of the world's worst ongoing humanitarian crises and is severely underreported; always include a Sudan update if one exists in the feed.
 
-6. Deprioritize:
+6. Deprioritize / EXCLUDE:
    - Celebrity gossip, entertainment unless truly major
-   - Local crime stories with no broader significance
+   - Local crime, fraud, or trafficking stories UNLESS they reveal a broader pattern, policy failure, cross-border dimension, or involve a public figure / significant sum with systemic implications. A single couple convicted of tax fraud, a local theft, a one-off arrest — these do NOT belong in a daily global digest.
+   - Stories that are rehashes of events that broke more than 24-36 hours ago with no genuinely new development today. If the only "news" is that diplomats are still talking about something from last week, skip it unless there is a concrete new fact (agreement reached, deadline set, named participant, new casualty figure, etc.). When in doubt, prefer silence over stale.
 
-7. Sports: INCLUDE top results/scores from major leagues and tournaments worldwide (Champions League, Premier League, La Liga, Bundesliga, NBA, F1, Grand Slams, cricket, Olympics, etc.) and any notable upsets or milestones. Tag as "sports". Aim for 8-12 sports items.
+7. Sports: INCLUDE top results/scores from major leagues and tournaments. PRIORITIZE (in this order): European football (Champions League, Europa League, Conference League, Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Ekstraklasa), Polish athletes in any sport, tennis Grand Slams, F1, Olympics, cricket Test matches. DEPRIORITIZE: NHL, NBA regular-season games, darts, snooker, rugby league unless there's a genuine milestone (title won, record broken, championship final). CONSOLIDATE: if several sources report the same tie or round (e.g., "Europa League quarter-finals"), merge into ONE item summarising the round, not one item per match. Tag as "sports". Aim for 5-8 sports items total — quality over quantity.
 
 8. Culture & Arts: INCLUDE notable cultural events, exhibitions, film/music releases, literary awards, theater, and cultural news. Prioritize Polish culture stories from Culture.pl alongside worldwide cultural highlights. Tag as "culture". Aim for 5-8 culture items.
 
@@ -88,13 +89,15 @@ export function buildCompilationPrompt(
 
 Write a comprehensive, well-organized daily digest in markdown. Each story should be 3-6 sentences — thorough enough that the reader never needs to click through to the original article. Include key facts, figures, quotes, and context. Always cite sources as clickable markdown links: ([Source Name](url)). Do NOT use markdown blockquote syntax (lines starting with >) as it does not render well in email.
 
-## MULTI-SOURCE ATTRIBUTION (IMPORTANT)
-When a story has an "all_sources" array with multiple entries, you MUST name the sources explicitly in the text:
-- If sources broadly agree, cite them together: "According to reports from BBC, Reuters, and France 24, ..." or end with "(...reported by [Source1](url), [Source2](url), and [Source3](url))"
-- If sources emphasize different aspects (check the "angle" field), describe each perspective by name: "BBC focused on the humanitarian toll ([BBC](url)), while Al Jazeera highlighted the diplomatic fallout ([Al Jazeera](url)) and TASS emphasized Russia's response ([TASS](url))"
-- For conflicting coverage (flagged with "conflicting": true), explicitly contrast the narratives: "Western outlets including The Guardian and Reuters reported X, while Chinese state media (China Daily, SCMP) framed the situation as Y"
-- Always link to at least 2-3 sources when multiple covered the same story — give the reader access to different perspectives
-- The goal is transparency: the reader should always know WHO is reporting WHAT, especially on geopolitically sensitive stories
+## SOURCE ATTRIBUTION (MANDATORY ON EVERY STORY)
+Every story MUST end with at least one linked source. No exceptions, no anonymous claims. Use the "all_sources" array on each story — it is always populated.
+
+- SINGLE-source stories (all_sources has one entry): name that source in the text. "Bloomberg reported ... ([Bloomberg](url))" or end with "([Bloomberg](url))". Never write a story with no citation.
+- MULTI-source stories (all_sources has 2+ entries): name the sources explicitly. If they broadly agree: "According to reports from BBC, Reuters, and France 24, ..." or end with "(reported by [BBC](url), [Reuters](url), and [France 24](url))".
+- Different angles (check the "angle" field): describe each perspective by name. "BBC focused on the humanitarian toll ([BBC](url)), while Al Jazeera highlighted the diplomatic fallout ([Al Jazeera](url)) and TASS emphasized Russia's response ([TASS](url))".
+- Conflicting coverage (flagged "conflicting": true): contrast the narratives. "Western outlets including The Guardian and Reuters reported X, while Chinese state media (China Daily, SCMP) framed the situation as Y".
+- For multi-source stories, link at least 2-3 sources so the reader can access different perspectives.
+- The goal is transparency: the reader should always know WHO is reporting WHAT.
 
 ## SECTION ORDER (follow this exact order)
 
@@ -153,7 +156,11 @@ Pick 3-4 notable stories from the Global South. Use sub-headers for each region.
 - **Kazakhstan**: Government approved new rare earth mining regulations. ([The Astana Times](url))
 - **Egypt**: Cairo metro expansion project receives $2B funding. ([Mada Masr](url))
 - **Iran**: Tehran announced new satellite launch timeline. ([Tehran Times](url))
-Prioritize stories from Central Asia, Middle East, Africa, and Latin America — regions that tend to be underrepresented in the main sections.]
+Prioritize stories from Central Asia, Middle East, Africa, and Latin America — regions that tend to be underrepresented in the main sections.
+
+SIGNIFICANCE BAR: every bullet must have broader significance — policy change, diplomatic move, economic shift, disaster, cross-border development, or a pattern revealing something systemic. A single couple convicted of fraud, a local crime, a one-off arrest, a personal-interest story — these do NOT belong here even if they fit a region you want to cover. Skip the region rather than fill with trivia. Central-bank signals count only if there is a concrete decision or new data point.
+
+FRESHNESS BAR: the bullet must reflect a new development in the last 24 hours — a new decision, new data, new named participant, new event. If the only "news" is that something reported last week is still being discussed, skip it.]
 
 ---
 
@@ -165,13 +172,19 @@ Prioritize stories from Central Asia, Middle East, Africa, and Latin America —
 
 ## ⚽ Sports
 
-[One-liner bullet points for major sports results from the last 24 hours. WORLDWIDE coverage — not limited to European football. Each bullet should be a single sentence with the key result/score. Format:
+[One-liner bullet points for major sports results from the last 24 hours, written for a European reader in Cyprus with ties to Poland. Each bullet: single sentence with the key result/score. Format:
 - **Champions League**: Barcelona 2-1 PSG in semi-final first leg. ([BBC Sport](url))
-- **Premier League**: Arsenal 3-0 Chelsea, moving to top of table. ([Sky Sports](url))
-- **NBA**: Lakers beat Celtics 112-108 in overtime. ([ESPN](url))
+- **Premier League**: Arsenal 3-0 Chelsea, moving to top of the table. ([Sky Sports](url))
 - **F1**: Verstappen wins Australian Grand Prix. ([The Guardian](url))
 - **Tennis**: Djokovic advances to Roland Garros quarter-finals. ([Marca](url))
-Cover: football (Champions League, Premier League, La Liga, Bundesliga, Serie A, Ekstraklasa), tennis (Grand Slams), F1, NBA, cricket, cycling, Olympics/major tournaments. Aim for 6-10 bullets. Bold the competition/league name at the start of each bullet. If no notable sports results exist for a day, write "No major results today."]
+
+PRIORITIZE (in this order): European football (Champions League, Europa League, Conference League, Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Ekstraklasa), Polish athletes in any sport, tennis Grand Slams, F1, Olympics, cricket Test matches.
+
+DEPRIORITIZE (only include with a genuine milestone — title won, record broken, championship final): NHL, NBA regular-season games, darts, snooker, rugby league, minor-league results. Routine regular-season scores from North American leagues do NOT belong here.
+
+CONSOLIDATE same-round coverage: when several matches from the same round are in the triaged stories (e.g., Europa League quarter-final second legs), write ONE bullet summarising the round's results — not one bullet per match. Example: "**Europa League**: Aston Villa and Nottingham Forest both advanced to the semi-finals, setting up an all-English tie; Tottenham and Rangers also through. ([BBC Sport](url), [Sky Sports](url))". Over-reporting football fixture-by-fixture is worse than under-reporting.
+
+Aim for 5-8 bullets total. Quality over quantity. Bold the competition/league at the start of each bullet. If nothing notable happened, write "No major results today." — don't pad.]
 
 ---
 
@@ -204,6 +217,9 @@ ALWAYS include at least 1-2 Polish culture items if available from Culture.pl or
 - GDP, employment, trade balance, or PMI data releases
 - IMF/World Bank forecasts or warnings
 - Notable economic policy changes (tariffs, sanctions, fiscal packages)
+
+CONTEXT RULE: every central-bank or macro item must include one clause explaining why it matters — for markets, for the euro area, for Poland, or for the reader's daily life. A bare "governor signalled caution ahead of meeting" is not enough. Either the item has a concrete new fact (number, decision, named action) AND a one-line "why it matters", or it doesn't belong in this section. If the only news is "official will speak at meeting next week", skip it entirely.
+
 If no major macro data was released today, briefly note what's coming up this week (e.g., "US CPI due Thursday, ECB meeting next week"). Always cite sources with links.]
 
 ---
