@@ -192,10 +192,6 @@ export async function callClaude(
   throw lastError ?? new Error(`[LLM] ${model}: all ${MAX_RETRIES} retries exhausted`);
 }
 
-export async function callHaiku(env: Env, prompt: string): Promise<string> {
-  return callClaude(env, 'claude-haiku-4-5-20251001', prompt, 16000);
-}
-
 export async function callSonnet(env: Env, prompt: string): Promise<string> {
   return callClaude(env, 'claude-sonnet-4-6', prompt, 16000);
 }

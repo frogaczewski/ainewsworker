@@ -1,7 +1,7 @@
 import { fetchAllFeeds } from './feeds';
 import { fetchWeather } from './weather';
 import { fetchMarketData } from './markets';
-import { callHaiku, callSonnet } from './llm';
+import { callSonnet } from './llm';
 import { buildTriagePrompt, buildCompilationPrompt, buildEmailBriefingPrompt, buildHeadlineEmailPrompt, buildTranslationPrompt } from './prompts';
 import { sendDigestEmail, sendErrorEmail } from './email';
 import { EMAIL_TO, EMAIL_TO_PL } from './config';
@@ -77,10 +77,10 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   }
 
   // Step 4: Haiku triage
-  console.log(`[Pipeline] Step 4: Triaging ${feedResult.items.length} items with Haiku...`);
+  console.log(`[Pipeline] Step 4: Triaging ${feedResult.items.length} items with Sonnet...`);
   let triagedStories: TriagedStory[];
 
-  // Cap items to ~400 most recent to keep within Haiku token limits
+  // Cap items to ~400 most recent to keep within model token limits
   const sortedItems = [...feedResult.items]
     .sort((a, b) => {
       const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
@@ -92,7 +92,7 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
 
   try {
     const triagePrompt = buildTriagePrompt(sortedItems);
-    const triageResponse = await callHaiku(env, triagePrompt);
+    const triageResponse = await callSonnet(env, triagePrompt);
     triagedStories = parseTriageResponse(triageResponse);
     console.log(`[Pipeline] Triage selected ${triagedStories.length} stories`);
   } catch (err) {
