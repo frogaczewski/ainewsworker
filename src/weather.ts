@@ -11,10 +11,12 @@ interface OpenMeteoResponse {
 }
 
 async function fetchWeatherForLocation(location: { name: string; lat: number; lon: number; timezone: string }): Promise<WeatherData> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
   try {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${location.lat}&longitude=${location.lon}&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=${encodeURIComponent(location.timezone)}&forecast_days=3`;
 
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -33,6 +35,8 @@ async function fetchWeatherForLocation(location: { name: string; lat: number; lo
       location: location.name,
       days: [{ date: 'N/A', conditions: 'Weather data temporarily unavailable', tempMax: 0, tempMin: 0 }],
     };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

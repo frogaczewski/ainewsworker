@@ -18,10 +18,13 @@ interface YahooChartResult {
 // Uses Promise.all so they run in parallel (counts as N subrequests but same wall-clock)
 async function fetchYahooQuotes(tickers: typeof MARKET_TICKERS): Promise<MarketQuote[]> {
   return Promise.all(tickers.map(async (ticker): Promise<MarketQuote> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker.symbol}?interval=1d&range=2d`;
       const response = await fetch(url, {
         headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: controller.signal,
       });
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -49,15 +52,19 @@ async function fetchYahooQuotes(tickers: typeof MARKET_TICKERS): Promise<MarketQ
         change: null,
         error: err instanceof Error ? err.message : String(err),
       };
+    } finally {
+      clearTimeout(timer);
     }
   }));
 }
 
 async function fetchCurrencyRates(pairs: typeof CURRENCY_PAIRS): Promise<CurrencyRate[]> {
   return Promise.all(pairs.map(async (pair): Promise<CurrencyRate> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
     try {
       const url = `https://api.frankfurter.app/latest?from=${pair.from}&to=${pair.to}`;
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: controller.signal });
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -76,6 +83,8 @@ async function fetchCurrencyRates(pairs: typeof CURRENCY_PAIRS): Promise<Currenc
         rate: null,
         error: err instanceof Error ? err.message : String(err),
       };
+    } finally {
+      clearTimeout(timer);
     }
   }));
 }
