@@ -304,6 +304,15 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
 
   await Promise.all(emailTasks);
 
+  // Heartbeat: tells the 03:30 retry cron that today's primary run completed.
+  // Written only after all emails resolved so a partial failure won't suppress the retry.
+  const heartbeatDate = new Date().toISOString().slice(0, 10);
+  try {
+    await env.DIGEST_KV.put('digest:lastSuccess', heartbeatDate);
+  } catch (err) {
+    console.error(`[Pipeline] Heartbeat write failed (non-fatal): ${err}`);
+  }
+
   console.log('[Pipeline] Daily digest sent successfully!');
   return 'success';
 }
@@ -361,19 +370,45 @@ function parseTriageResponse(response: string): TriagedStory[] {
   throw new Error('Triage returned empty or non-array result');
 }
 
+async function handleScheduled(event: ScheduledEvent, env: Env): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  // 03:30 UTC: only re-run if today's primary didn't write a heartbeat.
+  // No immediate alarm on the primary failure — we wait until retry also fails
+  // before paging, otherwise every transient blip generates noise.
+  if (event.cron === '30 3 * * *') {
+    const lastSuccess = await env.DIGEST_KV.get('digest:lastSuccess');
+    if (lastSuccess === today) {
+      console.log(`[Retry] Heartbeat ${lastSuccess} matches today — primary succeeded, skipping retry`);
+      return;
+    }
+    console.log(`[Retry] Heartbeat is "${lastSuccess ?? 'missing'}" — retrying pipeline...`);
+    try {
+      await runPipeline(env);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[Retry] Retry pipeline failed: ${message}`);
+      try {
+        await sendErrorEmail(env, `Both 03:00 and 03:30 UTC runs failed today (${today}).\n\nLatest error: ${message}`);
+      } catch (emailErr) {
+        console.error(`[Retry] Failed to send alarm email: ${emailErr}`);
+      }
+    }
+    return;
+  }
+
+  // Primary 03:00 path. Stay silent on failure — the 03:30 retry will alarm if both fail.
+  try {
+    await runPipeline(env);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Pipeline] Primary run failed (will retry at 03:30): ${message}`);
+  }
+}
+
 export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(
-      runPipeline(env).catch(async (err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(`[Pipeline] Fatal error: ${message}`);
-        try {
-          await sendErrorEmail(env, message);
-        } catch (emailErr) {
-          console.error(`[Pipeline] Failed to send error email: ${emailErr}`);
-        }
-      })
-    );
+    ctx.waitUntil(handleScheduled(event, env));
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
