@@ -1,7 +1,7 @@
 import { fetchAllFeeds } from './feeds';
 import { fetchWeather } from './weather';
 import { fetchMarketData } from './markets';
-import { callHaiku, callSonnet } from './llm';
+import { callSonnet } from './llm';
 import { buildTriagePrompt, buildCompilationPrompt, buildEmailBriefingPrompt, buildHeadlineEmailPrompt, buildTranslationPrompt } from './prompts';
 import { sendDigestEmail, sendErrorEmail } from './email';
 import { EMAIL_TO, EMAIL_TO_PL } from './config';
@@ -76,13 +76,14 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     throw new Error('No RSS items fetched — all feeds failed');
   }
 
-  // Step 4: Haiku triage
-  console.log(`[Pipeline] Step 4: Triaging ${feedResult.items.length} items with Haiku...`);
+  // Step 4: Sonnet triage
+  console.log(`[Pipeline] Step 4: Triaging ${feedResult.items.length} items with Sonnet...`);
   let triagedStories: TriagedStory[];
 
-  // Cap items to ~200 most recent. 400 was pushing the triage stream past
-  // Cloudflare's ~180s subrequest budget; 200 still gives Haiku plenty to
-  // pick 60–90 stories from while halving streaming time.
+  // Cap items to ~200 most recent so the triage stream finishes comfortably
+  // inside ATTEMPT_TIMEOUT_MS. Was 400, which pushed Haiku past 180s; even
+  // on Sonnet we keep the cap because larger inputs meaningfully slow the
+  // critical path.
   const sortedItems = [...feedResult.items]
     .sort((a, b) => {
       const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
@@ -94,13 +95,13 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
 
   try {
     const triagePrompt = buildTriagePrompt(sortedItems);
-    const triageResponse = await callHaiku(env, triagePrompt);
+    const triageResponse = await callSonnet(env, triagePrompt);
     triagedStories = parseTriageResponse(triageResponse);
     console.log(`[Pipeline] Triage selected ${triagedStories.length} stories`);
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.log(`[Pipeline] Haiku triage failed: ${errMsg}`);
-    console.log(`[Pipeline] Falling back to raw items for Sonnet`);
+    console.log(`[Pipeline] Sonnet triage failed: ${errMsg}`);
+    console.log(`[Pipeline] Falling back to raw items`);
     triagedStories = sortedItems.slice(0, 100).map(item => ({
       headline: item.title,
       summary: item.summary,
@@ -115,7 +116,7 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     }));
   }
 
-  // Carry over imageUrl from RSS items to triaged stories (Haiku doesn't return it)
+  // Carry over imageUrl from RSS items to triaged stories (the triage prompt doesn't ask for it)
   const imagesByLink = new Map<string, string>();
   for (const item of sortedItems) {
     if (item.imageUrl && item.link) imagesByLink.set(item.link, item.imageUrl);
