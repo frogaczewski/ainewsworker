@@ -1,7 +1,7 @@
 import { fetchAllFeeds } from './feeds';
 import { fetchWeather } from './weather';
 import { fetchMarketData } from './markets';
-import { callHaiku, callSonnet } from './llm';
+import { callSonnet } from './llm';
 import { buildTriagePrompt, buildCompilationPrompt, buildEmailBriefingPrompt, buildHeadlineEmailPrompt, buildTranslationPrompt } from './prompts';
 import { sendDigestEmail, sendErrorEmail } from './email';
 import { EMAIL_TO, EMAIL_TO_PL } from './config';
@@ -76,29 +76,32 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     throw new Error('No RSS items fetched — all feeds failed');
   }
 
-  // Step 4: Haiku triage
-  console.log(`[Pipeline] Step 4: Triaging ${feedResult.items.length} items with Haiku...`);
+  // Step 4: Sonnet triage
+  console.log(`[Pipeline] Step 4: Triaging ${feedResult.items.length} items with Sonnet...`);
   let triagedStories: TriagedStory[];
 
-  // Cap items to ~400 most recent to keep within Haiku token limits
+  // Cap items to ~200 most recent so the triage stream finishes comfortably
+  // inside ATTEMPT_TIMEOUT_MS. Was 400, which pushed Haiku past 180s; even
+  // on Sonnet we keep the cap because larger inputs meaningfully slow the
+  // critical path.
   const sortedItems = [...feedResult.items]
     .sort((a, b) => {
       const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
       const db = b.pubDate ? new Date(b.pubDate).getTime() : 0;
       return db - da;
     })
-    .slice(0, 400);
+    .slice(0, 200);
   console.log(`[Pipeline] Using ${sortedItems.length} most recent items for triage`);
 
   try {
     const triagePrompt = buildTriagePrompt(sortedItems);
-    const triageResponse = await callHaiku(env, triagePrompt);
+    const triageResponse = await callSonnet(env, triagePrompt);
     triagedStories = parseTriageResponse(triageResponse);
     console.log(`[Pipeline] Triage selected ${triagedStories.length} stories`);
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.log(`[Pipeline] Haiku triage failed: ${errMsg}`);
-    console.log(`[Pipeline] Falling back to raw items for Sonnet`);
+    console.log(`[Pipeline] Sonnet triage failed: ${errMsg}`);
+    console.log(`[Pipeline] Falling back to raw items`);
     triagedStories = sortedItems.slice(0, 100).map(item => ({
       headline: item.title,
       summary: item.summary,
@@ -113,7 +116,7 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     }));
   }
 
-  // Carry over imageUrl from RSS items to triaged stories (Haiku doesn't return it)
+  // Carry over imageUrl from RSS items to triaged stories (the triage prompt doesn't ask for it)
   const imagesByLink = new Map<string, string>();
   for (const item of sortedItems) {
     if (item.imageUrl && item.link) imagesByLink.set(item.link, item.imageUrl);
@@ -176,29 +179,27 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
 
   console.log(`[Pipeline] Full digest compiled (${fullDigest.length} characters)`);
 
-  // Step 5b: Sonnet — email briefing (shorter, with links to website)
-  console.log('[Pipeline] Step 5b: Generating email briefing with Sonnet...');
+  // Steps 5b + 5c: email briefing and headline email. Both depend only on
+  // fullDigest, so run them in parallel — saves ~90s wall-clock.
+  console.log('[Pipeline] Steps 5b + 5c: Generating email briefing and headline email in parallel...');
   const websiteUrl = 'https://ainewsworker.rogaczewski-dev.workers.dev';
-  let emailBriefing: string;
+  const todayDate = new Date().toISOString().slice(0, 10);
 
-  emailBriefing = await callSonnet(env, buildEmailBriefingPrompt(fullDigest, websiteUrl));
+  const [briefingRaw, headlineRaw] = await Promise.all([
+    callSonnet(env, buildEmailBriefingPrompt(fullDigest, websiteUrl)),
+    callSonnet(env, buildHeadlineEmailPrompt(fullDigest, websiteUrl)).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[Pipeline] Headline email failed, skipping A/B test: ${msg}`);
+      return '';
+    }),
+  ]);
 
+  let emailBriefing = rewriteStoryLinks(briefingRaw, websiteUrl, todayDate);
   console.log(`[Pipeline] Email briefing compiled (${emailBriefing.length} characters)`);
 
-  // Post-process: replace generic website links with proper /story/{date}/{slug} links
-  const todayDate = new Date().toISOString().slice(0, 10);
-  emailBriefing = rewriteStoryLinks(emailBriefing, websiteUrl, todayDate);
-
-  // Step 5c: Headline email (A/B test — new scannable format, sent only to Filip)
-  console.log('[Pipeline] Step 5c: Generating headline email (A/B test)...');
-  let headlineEmail = '';
-  try {
-    headlineEmail = await callSonnet(env, buildHeadlineEmailPrompt(fullDigest, websiteUrl));
-    headlineEmail = rewriteStoryLinks(headlineEmail, websiteUrl, todayDate);
+  const headlineEmail = headlineRaw ? rewriteStoryLinks(headlineRaw, websiteUrl, todayDate) : '';
+  if (headlineEmail) {
     console.log(`[Pipeline] Headline email compiled (${headlineEmail.length} characters)`);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.log(`[Pipeline] Headline email failed, skipping A/B test: ${msg}`);
   }
 
   // Save everything to KV — full digest + email briefing
@@ -304,6 +305,15 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
 
   await Promise.all(emailTasks);
 
+  // Heartbeat: tells the 03:30 retry cron that today's primary run completed.
+  // Written only after all emails resolved so a partial failure won't suppress the retry.
+  const heartbeatDate = new Date().toISOString().slice(0, 10);
+  try {
+    await env.DIGEST_KV.put('digest:lastSuccess', heartbeatDate);
+  } catch (err) {
+    console.error(`[Pipeline] Heartbeat write failed (non-fatal): ${err}`);
+  }
+
   console.log('[Pipeline] Daily digest sent successfully!');
   return 'success';
 }
@@ -361,19 +371,45 @@ function parseTriageResponse(response: string): TriagedStory[] {
   throw new Error('Triage returned empty or non-array result');
 }
 
+async function handleScheduled(event: ScheduledEvent, env: Env): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  // 03:30 UTC: only re-run if today's primary didn't write a heartbeat.
+  // No immediate alarm on the primary failure — we wait until retry also fails
+  // before paging, otherwise every transient blip generates noise.
+  if (event.cron === '30 3 * * *') {
+    const lastSuccess = await env.DIGEST_KV.get('digest:lastSuccess');
+    if (lastSuccess === today) {
+      console.log(`[Retry] Heartbeat ${lastSuccess} matches today — primary succeeded, skipping retry`);
+      return;
+    }
+    console.log(`[Retry] Heartbeat is "${lastSuccess ?? 'missing'}" — retrying pipeline...`);
+    try {
+      await runPipeline(env);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[Retry] Retry pipeline failed: ${message}`);
+      try {
+        await sendErrorEmail(env, `Both 03:00 and 03:30 UTC runs failed today (${today}).\n\nLatest error: ${message}`);
+      } catch (emailErr) {
+        console.error(`[Retry] Failed to send alarm email: ${emailErr}`);
+      }
+    }
+    return;
+  }
+
+  // Primary 03:00 path. Stay silent on failure — the 03:30 retry will alarm if both fail.
+  try {
+    await runPipeline(env);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Pipeline] Primary run failed (will retry at 03:30): ${message}`);
+  }
+}
+
 export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(
-      runPipeline(env).catch(async (err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(`[Pipeline] Fatal error: ${message}`);
-        try {
-          await sendErrorEmail(env, message);
-        } catch (emailErr) {
-          console.error(`[Pipeline] Failed to send error email: ${emailErr}`);
-        }
-      })
-    );
+    ctx.waitUntil(handleScheduled(event, env));
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

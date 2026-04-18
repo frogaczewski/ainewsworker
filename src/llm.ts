@@ -8,7 +8,10 @@ const RETRIABLE_STATUS_CODES = new Set([403, 408, 429, 500, 502, 503, 504, 529])
 // guard rails a stalled fetch or silently hung stream can burn the entire
 // budget and the digest never ships (see exceededCpu / wallTimeMs=899985
 // incident on 2026-04-17).
-const ATTEMPT_TIMEOUT_MS = 180_000;   // hard upper bound per fetch+stream attempt
+// Polish translation legitimately needs >180s on Sonnet (~25K-char output);
+// 5a is also right at the edge. The chunk-idle timeout still catches truly
+// stuck streams quickly, so this only matters for slow-but-progressing ones.
+const ATTEMPT_TIMEOUT_MS = 300_000;   // hard upper bound per fetch+stream attempt
 const CHUNK_IDLE_TIMEOUT_MS = 45_000; // max time between SSE chunks before we abort
 
 function parseApiError(status: number, body: string): { type: string; message: string; code?: number } {
@@ -190,10 +193,6 @@ export async function callClaude(
   }
 
   throw lastError ?? new Error(`[LLM] ${model}: all ${MAX_RETRIES} retries exhausted`);
-}
-
-export async function callHaiku(env: Env, prompt: string): Promise<string> {
-  return callClaude(env, 'claude-haiku-4-5-20251001', prompt, 16000);
 }
 
 export async function callSonnet(env: Env, prompt: string): Promise<string> {

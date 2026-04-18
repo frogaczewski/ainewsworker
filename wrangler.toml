@@ -5,12 +5,16 @@ compatibility_date = "2024-01-01"
 [observability]
 enabled = true
 
+[limits]
+cpu_ms = 300000  # 5 minutes — Workers Standard max; pipeline needs >30s default
+
 [[kv_namespaces]]
 binding = "DIGEST_KV"
 id = "ef7d3c8046664432a3632f8a5777a95a"
 
 [triggers]
-crons = ["0 3 * * *"]  # 03:00 UTC daily (06:00 Cyprus summer, 05:00 Poland summer)
+# 03:00 UTC primary run; 03:30 UTC retry-if-failed (heartbeat-gated, see scheduled handler)
+crons = ["0 3 * * *", "30 3 * * *"]
 
 # All secrets are already set in the Cloudflare dashboard:
 # CLAUDE_PLATFORM_API  — Anthropic API key
