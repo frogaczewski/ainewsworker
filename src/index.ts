@@ -80,14 +80,16 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   console.log(`[Pipeline] Step 4: Triaging ${feedResult.items.length} items with Haiku...`);
   let triagedStories: TriagedStory[];
 
-  // Cap items to ~400 most recent to keep within Haiku token limits
+  // Cap items to ~200 most recent. 400 was pushing the triage stream past
+  // Cloudflare's ~180s subrequest budget; 200 still gives Haiku plenty to
+  // pick 60–90 stories from while halving streaming time.
   const sortedItems = [...feedResult.items]
     .sort((a, b) => {
       const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
       const db = b.pubDate ? new Date(b.pubDate).getTime() : 0;
       return db - da;
     })
-    .slice(0, 400);
+    .slice(0, 200);
   console.log(`[Pipeline] Using ${sortedItems.length} most recent items for triage`);
 
   try {
@@ -176,29 +178,27 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
 
   console.log(`[Pipeline] Full digest compiled (${fullDigest.length} characters)`);
 
-  // Step 5b: Sonnet — email briefing (shorter, with links to website)
-  console.log('[Pipeline] Step 5b: Generating email briefing with Sonnet...');
+  // Steps 5b + 5c: email briefing and headline email. Both depend only on
+  // fullDigest, so run them in parallel — saves ~90s wall-clock.
+  console.log('[Pipeline] Steps 5b + 5c: Generating email briefing and headline email in parallel...');
   const websiteUrl = 'https://ainewsworker.rogaczewski-dev.workers.dev';
-  let emailBriefing: string;
+  const todayDate = new Date().toISOString().slice(0, 10);
 
-  emailBriefing = await callSonnet(env, buildEmailBriefingPrompt(fullDigest, websiteUrl));
+  const [briefingRaw, headlineRaw] = await Promise.all([
+    callSonnet(env, buildEmailBriefingPrompt(fullDigest, websiteUrl)),
+    callSonnet(env, buildHeadlineEmailPrompt(fullDigest, websiteUrl)).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[Pipeline] Headline email failed, skipping A/B test: ${msg}`);
+      return '';
+    }),
+  ]);
 
+  let emailBriefing = rewriteStoryLinks(briefingRaw, websiteUrl, todayDate);
   console.log(`[Pipeline] Email briefing compiled (${emailBriefing.length} characters)`);
 
-  // Post-process: replace generic website links with proper /story/{date}/{slug} links
-  const todayDate = new Date().toISOString().slice(0, 10);
-  emailBriefing = rewriteStoryLinks(emailBriefing, websiteUrl, todayDate);
-
-  // Step 5c: Headline email (A/B test — new scannable format, sent only to Filip)
-  console.log('[Pipeline] Step 5c: Generating headline email (A/B test)...');
-  let headlineEmail = '';
-  try {
-    headlineEmail = await callSonnet(env, buildHeadlineEmailPrompt(fullDigest, websiteUrl));
-    headlineEmail = rewriteStoryLinks(headlineEmail, websiteUrl, todayDate);
+  const headlineEmail = headlineRaw ? rewriteStoryLinks(headlineRaw, websiteUrl, todayDate) : '';
+  if (headlineEmail) {
     console.log(`[Pipeline] Headline email compiled (${headlineEmail.length} characters)`);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.log(`[Pipeline] Headline email failed, skipping A/B test: ${msg}`);
   }
 
   // Save everything to KV — full digest + email briefing
