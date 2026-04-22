@@ -198,3 +198,7 @@ export async function callClaude(
 export async function callSonnet(env: Env, prompt: string): Promise<string> {
   return callClaude(env, 'claude-sonnet-4-6', prompt, 16000);
 }
+
+export async function callHaiku(env: Env, prompt: string, maxTokens = 8000): Promise<string> {
+  return callClaude(env, 'claude-haiku-4-5-20251001', prompt, maxTokens);
+}

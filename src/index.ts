@@ -2,11 +2,12 @@ import { fetchAllFeeds } from './feeds';
 import { fetchWeather } from './weather';
 import { fetchMarketData } from './markets';
 import { callSonnet } from './llm';
-import { buildTriagePrompt, buildCompilationPrompt, buildEmailBriefingPrompt, buildHeadlineEmailPrompt, buildTranslationPrompt } from './prompts';
+import { buildTriagePrompt, buildCompilationPrompt, buildSectionedCompilationPrompt, buildEmailBriefingPrompt, buildHeadlineEmailPrompt, buildTranslationPrompt } from './prompts';
+import { classifyInBatches, urlDedupAndDropLow, semanticDedup, selectForDigest, selectedToFlat } from './classify';
 import { sendDigestEmail, sendErrorEmail } from './email';
 import { EMAIL_TO, EMAIL_TO_PL } from './config';
 import { buildLandingPage, buildStoryPage, generateSlug } from './landing';
-import type { Env, TriagedStory, FeedStatus, DigestData } from './types';
+import type { Env, TriagedStory, FeedStatus, DigestData, SelectedDigestInput, ClassifiedItem } from './types';
 
 function greetedMarkdown(markdown: string, recipientName: string, polish: boolean): string {
   const firstName = recipientName.split(' ')[0];
@@ -44,8 +45,10 @@ function rewriteStoryLinks(markdown: string, websiteUrl: string, date: string): 
 }
 
 interface PipelineOptions {
-  dryRun?: boolean;  // skip compilation, translation, and emails — just populate KV
-  testMode?: boolean; // run full pipeline but only email frogaczewski@gmail.com (skip Polish)
+  dryRun?: boolean;        // skip compilation, translation, and emails — just populate KV
+  testMode?: boolean;      // run full pipeline but only email frogaczewski@gmail.com (skip Polish)
+  classifyOnly?: boolean;  // batched path only: run Stages 1-3, write classified:{date}, stop
+  selectOnly?: boolean;    // batched path only: run Stages 1-4, write selected:{date}, stop
 }
 
 async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string> {
@@ -76,47 +79,101 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     throw new Error('No RSS items fetched — all feeds failed');
   }
 
-  // Step 4: Sonnet triage
-  console.log(`[Pipeline] Step 4: Triaging ${feedResult.items.length} items with Sonnet...`);
+  // Step 4: triage — feature-flagged between the legacy Sonnet single-call path
+  // and the new batched Haiku pipeline.
+  const useBatched = env.USE_BATCHED_CLASSIFICATION === 'true';
+  const runDate = new Date().toISOString().slice(0, 10);
   let triagedStories: TriagedStory[];
+  let selectedInput: SelectedDigestInput | null = null;
+  const sortedItems = [...feedResult.items].sort((a, b) => {
+    const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
+    const db = b.pubDate ? new Date(b.pubDate).getTime() : 0;
+    return db - da;
+  });
 
-  // Cap items to ~200 most recent so the triage stream finishes comfortably
-  // inside ATTEMPT_TIMEOUT_MS. Was 400, which pushed Haiku past 180s; even
-  // on Sonnet we keep the cap because larger inputs meaningfully slow the
-  // critical path.
-  const sortedItems = [...feedResult.items]
-    .sort((a, b) => {
-      const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
-      const db = b.pubDate ? new Date(b.pubDate).getTime() : 0;
-      return db - da;
-    })
-    .slice(0, 200);
-  console.log(`[Pipeline] Using ${sortedItems.length} most recent items for triage`);
+  if (useBatched) {
+    console.log(`[Pipeline] Step 4 (batched): classifying ${sortedItems.length} items with Haiku...`);
 
-  try {
-    const triagePrompt = buildTriagePrompt(sortedItems);
-    const triageResponse = await callSonnet(env, triagePrompt);
-    triagedStories = parseTriageResponse(triageResponse);
-    console.log(`[Pipeline] Triage selected ${triagedStories.length} stories`);
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.log(`[Pipeline] Sonnet triage failed: ${errMsg}`);
-    console.log(`[Pipeline] Falling back to raw items`);
-    triagedStories = sortedItems.slice(0, 100).map(item => ({
-      headline: item.title,
-      summary: item.summary,
-      source: item.source,
-      link: item.link,
-      country_tags: [],
-      category_tags: [],
-      importance: 'medium' as const,
-      duplicate_of: null,
-      editorial: item.editorial,
-      ...(item.imageUrl && { imageUrl: item.imageUrl }),
-    }));
+    // Stage 2: batched Haiku classification (each batch writes to KV for resumption)
+    const classified = await classifyInBatches(env, sortedItems, runDate);
+    console.log(`[Pipeline] Classified ${classified.length}/${sortedItems.length} items`);
+
+    if (classified.length === 0) {
+      throw new Error('Batched classification returned 0 items — every batch failed');
+    }
+
+    // Stage 3a: URL dedup + drop low importance
+    const urlDeduped = urlDedupAndDropLow(classified);
+
+    // Stage 3b: semantic dedup (one Haiku call over survivors)
+    const fullyDeduped = await semanticDedup(env, urlDeduped);
+
+    // Persist the deduplicated pool for auditability. 7-day TTL — enough to
+    // inspect "why did story X not make today's digest?" for a reasonable window.
+    try {
+      await env.DIGEST_KV.put(`classified:${runDate}`, JSON.stringify(fullyDeduped), { expirationTtl: 604_800 });
+    } catch (err) {
+      console.log(`[Pipeline] KV write classified:${runDate} failed (non-fatal): ${err}`);
+    }
+
+    // classifyOnly dry run: stop here so we can inspect the classified pool
+    if (opts.classifyOnly) {
+      console.log(`[Pipeline] classifyOnly mode — wrote classified:${runDate} (${fullyDeduped.length} items), stopping`);
+      return `classify-only-success:${fullyDeduped.length}`;
+    }
+
+    // Stage 4: balance-aware selection (deterministic, no LLM)
+    selectedInput = selectForDigest(fullyDeduped);
+    console.log(
+      `[Pipeline] Selection: ${selectedInput.sections.length} sections, ` +
+      `${selectedInput.sections.reduce((n, s) => n + s.stories.length, 0)} stories, ` +
+      `${selectedInput.dropped?.length ?? 0} dropped, ${selectedInput.gaps?.length ?? 0} gaps`
+    );
+
+    try {
+      await env.DIGEST_KV.put(`selected:${runDate}`, JSON.stringify(selectedInput), { expirationTtl: 604_800 });
+    } catch (err) {
+      console.log(`[Pipeline] KV write selected:${runDate} failed (non-fatal): ${err}`);
+    }
+
+    if (opts.selectOnly) {
+      console.log(`[Pipeline] selectOnly mode — wrote selected:${runDate}, stopping`);
+      return 'select-only-success';
+    }
+
+    triagedStories = selectedToFlat(selectedInput);
+  } else {
+    // Legacy path — retained behind feature flag so we can roll back instantly
+    // if the batched pipeline regresses. Delete this branch once the new path
+    // has been stable in production for ~1 week.
+    const cappedItems = sortedItems.slice(0, 200);
+    console.log(`[Pipeline] Step 4 (legacy): triaging ${cappedItems.length}/${sortedItems.length} items with Sonnet...`);
+
+    try {
+      const triagePrompt = buildTriagePrompt(cappedItems);
+      const triageResponse = await callSonnet(env, triagePrompt);
+      triagedStories = parseTriageResponse(triageResponse);
+      console.log(`[Pipeline] Triage selected ${triagedStories.length} stories`);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.log(`[Pipeline] Sonnet triage failed: ${errMsg}`);
+      console.log(`[Pipeline] Falling back to raw items`);
+      triagedStories = cappedItems.slice(0, 100).map(item => ({
+        headline: item.title,
+        summary: item.summary,
+        source: item.source,
+        link: item.link,
+        country_tags: [],
+        category_tags: [],
+        importance: 'medium' as const,
+        duplicate_of: null,
+        editorial: item.editorial,
+        ...(item.imageUrl && { imageUrl: item.imageUrl }),
+      }));
+    }
   }
 
-  // Carry over imageUrl from RSS items to triaged stories (the triage prompt doesn't ask for it)
+  // Carry over imageUrl from RSS items to triaged stories (triage prompts don't ask for it)
   const imagesByLink = new Map<string, string>();
   for (const item of sortedItems) {
     if (item.imageUrl && item.link) imagesByLink.set(item.link, item.imageUrl);
@@ -169,12 +226,9 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
   console.log('[Pipeline] Step 5a: Compiling full digest with Sonnet...');
   let fullDigest: string;
 
-  const compilationPrompt = buildCompilationPrompt(
-    triagedStories,
-    weather,
-    markets,
-    { total: feedResult.total, failed: feedResult.failed },
-  );
+  const compilationPrompt = selectedInput
+    ? buildSectionedCompilationPrompt(selectedInput, weather, markets, { total: feedResult.total, failed: feedResult.failed })
+    : buildCompilationPrompt(triagedStories, weather, markets, { total: feedResult.total, failed: feedResult.failed });
   fullDigest = await callSonnet(env, compilationPrompt);
 
   console.log(`[Pipeline] Full digest compiled (${fullDigest.length} characters)`);
@@ -244,21 +298,24 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     return 'test-success';
   }
 
-  // Step 6: Translate email briefing to Polish with Sonnet
-  console.log('[Pipeline] Step 6: Translating email briefing to Polish...');
-  let polishBriefing: string;
+  // Step 6: Kick off Polish translation but DO NOT block English sends on it.
+  // The 03:00 cron on 2026-04-21 reached this point with only ~4 min left of the
+  // 15-min wall budget; translation stalled and the worker was killed before any
+  // email shipped. Running translation in parallel with English send means a
+  // hung/slow translation can no longer take down the whole digest.
+  console.log('[Pipeline] Step 6: Translating email briefing to Polish (parallel with English send)...');
+  const polishBriefingPromise = callSonnet(env, buildTranslationPrompt(emailBriefing))
+    .then((translated) => {
+      console.log(`[Pipeline] Polish translation: ${translated.length} characters`);
+      return translated;
+    })
+    .catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[Pipeline] Polish translation failed, falling back to English: ${msg}`);
+      return `> **Uwaga:** Automatyczne tłumaczenie było dziś niedostępne. Poniżej wersja angielska.\n\n---\n\n${emailBriefing}`;
+    });
 
-  try {
-    polishBriefing = await callSonnet(env, buildTranslationPrompt(emailBriefing));
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.log(`[Pipeline] Polish translation failed, falling back to English: ${msg}`);
-    polishBriefing = `> **Uwaga:** Automatyczne tłumaczenie było dziś niedostępne. Poniżej wersja angielska.\n\n---\n\n${emailBriefing}`;
-  }
-
-  console.log(`[Pipeline] Polish translation: ${polishBriefing.length} characters`);
-
-  // Step 7: Send emails (English + Polish in parallel)
+  // Step 7: Send emails.
   console.log('[Pipeline] Step 7: Sending emails...');
 
   const today = new Date();
@@ -276,7 +333,8 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     year: 'numeric',
   });
 
-  const emailTasks: Promise<void>[] = [
+  // 7a: English sends go out immediately — they don't need the translation.
+  const englishTasks: Promise<void>[] = [
     sendDigestEmail(env, greetedMarkdown(emailBriefing, EMAIL_TO.name, false)).catch(async () => {
       console.log('[Pipeline] English email failed, retrying once...');
       await sendDigestEmail(env, greetedMarkdown(emailBriefing, EMAIL_TO.name, false));
@@ -285,16 +343,22 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
 
   // A/B test: send headline-format email only to Filip
   if (headlineEmail) {
-    emailTasks.push(
+    englishTasks.push(
       sendDigestEmail(env, greetedMarkdown(headlineEmail, EMAIL_TO.name, false), undefined, EMAIL_TO, `[NEW] Daily News Digest — ${enDateStr}`).catch((err) => {
         console.log(`[Pipeline] Headline test email failed: ${err}`);
       }),
     );
   }
 
+  await Promise.all(englishTasks);
+  console.log('[Pipeline] English emails dispatched');
+
+  // 7b: Await the Polish translation (already in-flight) and send to PL recipients.
+  const polishBriefing = await polishBriefingPromise;
+  const polishTasks: Promise<void>[] = [];
   if (polishBriefing) {
     for (const plRecipient of EMAIL_TO_PL) {
-      emailTasks.push(
+      polishTasks.push(
         sendDigestEmail(env, greetedMarkdown(polishBriefing, plRecipient.name, true), undefined, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`).catch(async () => {
           console.log(`[Pipeline] Polish email to ${plRecipient.email} failed, retrying once...`);
           await sendDigestEmail(env, greetedMarkdown(polishBriefing, plRecipient.name, true), undefined, plRecipient, `Codzienny Przegląd Wiadomości — ${plDateStr}`);
@@ -303,7 +367,7 @@ async function runPipeline(env: Env, opts: PipelineOptions = {}): Promise<string
     }
   }
 
-  await Promise.all(emailTasks);
+  await Promise.all(polishTasks);
 
   // Heartbeat: tells the 03:30 retry cron that today's primary run completed.
   // Written only after all emails resolved so a partial failure won't suppress the retry.
@@ -421,8 +485,10 @@ export default {
       // the full wall-clock allowance. Streaming LLM calls keep it alive.
       const dryRun = url.searchParams.get('dry') === 'true';
       const testMode = url.searchParams.get('test') === 'true';
+      const classifyOnly = url.searchParams.get('classifyOnly') === 'true';
+      const selectOnly = url.searchParams.get('selectOnly') === 'true';
       try {
-        const result = await runPipeline(env, { dryRun, testMode });
+        const result = await runPipeline(env, { dryRun, testMode, classifyOnly, selectOnly });
         return new Response(JSON.stringify({ status: 'success', result }), {
           headers: { 'Content-Type': 'application/json' },
         });

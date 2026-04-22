@@ -8,6 +8,11 @@ enabled = true
 [limits]
 cpu_ms = 300000  # 5 minutes — Workers Standard max; pipeline needs >30s default
 
+[vars]
+# Feature flag: enables the new batched Haiku classification pipeline.
+# Set to "false" to fall back to the legacy single-call Sonnet triage path.
+USE_BATCHED_CLASSIFICATION = "true"
+
 [[kv_namespaces]]
 binding = "DIGEST_KV"
 id = "ef7d3c8046664432a3632f8a5777a95a"
@@ -20,3 +25,7 @@ crons = ["0 3 * * *", "30 3 * * *"]
 # CLAUDE_PLATFORM_API  — Anthropic API key
 # MAILJET_API_KEY      — Mailjet public key
 # MAILJET_SECRET_KEY   — Mailjet secret key
+#
+# Feature flag (plain env var, not a secret):
+# USE_BATCHED_CLASSIFICATION=true  — enables the new batched Haiku pipeline.
+# Unset or "false" runs the legacy single-call Sonnet triage path.

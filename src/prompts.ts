@@ -1,4 +1,4 @@
-import type { RssItem, TriagedStory, WeatherData, MarketData } from './types';
+import type { RssItem, TriagedStory, WeatherData, MarketData, ClassifiedItem, SelectedDigestInput } from './types';
 
 export function buildTriagePrompt(items: RssItem[]): string {
   const itemsText = items.map((item, i) =>
@@ -402,4 +402,267 @@ Zwróć TYLKO przetłumaczony markdown, bez komentarzy.
 
 === ENGLISH DIGEST ===
 ${digest}`;
+}
+
+// ==============================================================================
+// BATCHED CLASSIFICATION PIPELINE (feature-flagged: USE_BATCHED_CLASSIFICATION)
+// ==============================================================================
+
+/**
+ * Stage 2: per-batch Haiku classification.
+ * Given ~75 RSS items, emit a JSON array of ClassifiedItem objects.
+ * No selection happens here — every input item is classified and returned.
+ * No cross-batch dedup happens here either (see Stage 3).
+ */
+export function buildClassificationPrompt(items: RssItem[]): string {
+  const itemsText = items.map((item, i) =>
+    `[${i}] SOURCE: ${item.source}${item.editorial ? ' [EDITORIAL]' : ''}\nTITLE: ${item.title}\nSUMMARY: ${item.summary}\nLINK: ${item.link}\nDATE: ${item.pubDate}`
+  ).join('\n\n');
+
+  return `You are tagging news items for a daily digest. The reader lives in Cyprus with ties to Poland and follows technology, climate, science, global politics, and business. Every item below will be classified — do NOT filter anything out, even if it looks uninteresting. Importance ratings handle that.
+
+For EACH item, return a JSON object:
+{
+  "link": "carried through exactly",
+  "headline": "carried through (translate to English if Polish/Nepali/etc.)",
+  "summary": "carried through (translate to English if needed, keep under 400 chars)",
+  "source": "carried through",
+  "pubDate": "carried through",
+  "importance": "high" | "medium" | "low",
+  "country_tags": ["PL","CY","NP","UA","IL","US","CN","RU","IN","FR","DE","UK","ES","IT","BR","SD","NG","ID","VN","JP","KR","PK","EG","IR","LB",...],
+  "category_tags": ["politics","tech_ai","climate","science","business","health","sports","culture","economics","editorial"],
+  "editorial": true | false
+}
+
+## IMPORTANCE RULES
+
+**HIGH** — the story genuinely matters to a well-informed reader:
+- Breaking events: wars, major attacks, deaths of world leaders, coups, elections being called/results announced
+- Major policy or legal decisions with broad impact (new treaties, landmark court rulings, central bank rate decisions, large regulatory changes)
+- Scientific breakthroughs (published research, drug approvals, space milestones)
+- ANY story directly about Poland, Cyprus, Nepal, or Ukraine — these are priority countries
+- Major humanitarian crises: Sudan, Gaza, Yemen, climate disasters with significant casualties
+
+**MEDIUM** — substantive and worth noting, not urgent:
+- Domestic politics in major countries (non-PL/CY/NP/UA)
+- Policy changes in second-tier countries
+- Significant business/economy stories (earnings, mergers, unemployment figures, inflation prints)
+- Notable cultural events (major awards, big exhibitions, famous artist releases)
+- Sports: top-flight league results (Champions League, Premier League, La Liga, Bundesliga, Serie A, Ekstraklasa; NBA finals; Grand Slam tennis; F1), notable upsets or milestones
+- Climate and environment developments
+- Tech/AI launches, research, regulatory decisions
+- Editorial/investigative pieces from Bellingcat, The Conversation, etc.
+
+**LOW** — don't waste the reader's time:
+- Celebrity gossip, entertainment industry fluff
+- Lifestyle/listicle content ("10 best beaches")
+- Minor local crime in countries other than PL/CY/NP with no broader significance
+- Routine league matches outside the top flight (Championship, third division, minor leagues) — UNLESS it's a historic promotion/relegation involving a well-known club
+- NBA regular-season midweek games, routine injuries, minor transactions
+- Op-eds without news peg, think-pieces rehashing known arguments
+
+## TAGGING RULES
+
+- **country_tags**: ISO 3166-1 alpha-2 codes (PL, CY, NP, UA, IL, US, ...). Include EVERY country the story directly concerns. For Middle East conflict, tag at least IL/IR/LB as appropriate. For Ukraine-Russia war, tag UA AND RU.
+- **category_tags**: a story can have multiple (e.g. a Ukraine strike: ["politics"]; an EU climate regulation: ["politics","climate"]; a Polish culture festival: ["culture"]). If the source is in Bellingcat/The Conversation/Intercept/Global Voices/Carbon Brief/ICIJ/OCCRP/Mongabay/The Markup, add "editorial".
+- **editorial**: true if the source is marked [EDITORIAL] in the input.
+- **Sports**: always tag category "sports". Tag country_tags with the league's country (NBA → US; Ekstraklasa → PL; Premier League → UK).
+
+## LANGUAGE
+
+Any Polish, Nepali, or other non-English headline/summary: translate to English in the output. Keep summaries under 400 characters.
+
+## OUTPUT
+
+Return ONLY a JSON array of objects — one per input item, in the same order. No markdown code fences. No commentary. No items omitted.
+
+=== RSS ITEMS ===
+${itemsText}`;
+}
+
+/**
+ * Stage 3b: semantic dedup across ALL classified items (post URL-dedup).
+ * One Haiku call sees every surviving item at once and returns groups of items
+ * that describe the same event.
+ *
+ * Input: minimal tuples — summaries are NOT included to keep the payload small.
+ */
+export function buildSemanticDedupPrompt(items: ClassifiedItem[]): string {
+  const itemsText = items.map((item, i) =>
+    `[${i}] ${item.source} — "${item.headline}" — tags: ${(item.country_tags || []).join(',')} — ${item.pubDate}`
+  ).join('\n');
+
+  return `You are finding duplicate news stories. Each line below is ONE news item: [idx] source — "headline" — country_tags — pubDate.
+
+Group items that describe the SAME real-world event. Two items are duplicates when they report on the same specific event, even if they emphasise different aspects (e.g., "civilian toll" and "diplomatic response" to the same strike are duplicates; they cover the same event from different angles).
+
+NOT duplicates:
+- Two separate events involving the same actor (two different Trump announcements on the same day)
+- Same general topic but different specific events (two unrelated climate protests)
+- Multi-day coverage of an ongoing situation — treat different days as separate events unless the headline is clearly about the SAME news moment
+
+Output format — return ONLY a JSON array:
+[
+  {"primary": 3, "duplicates": [7, 11, 19], "rationale": "short note — all about today's Iran strike"},
+  {"primary": 5, "duplicates": [14], "rationale": "both about today's Polish sejm vote"}
+]
+
+- "primary" is the idx of the most authoritative/original entry (prefer major agencies: Reuters, BBC, Bloomberg; or the source closest to the story — e.g. Al Jazeera for Middle East, Kathmandu Post for Nepal).
+- "duplicates" lists the OTHER idxs that cover the same event. Do NOT include the primary's own idx.
+- Only emit groups with at least one duplicate. Items not in any group are implicit singletons — do not list them.
+- If multiple sources cover the same event from clearly contradictory angles (e.g. Western outlet vs Russian state media with different framings), still put them in the same group — add "conflicting" before the rationale, like: "conflicting — BBC reports casualties, TASS denies them"
+
+Return ONLY the JSON array, no markdown fences, no commentary.
+
+=== ITEMS ===
+${itemsText}`;
+}
+
+/**
+ * Stage 5 (new): compilation prompt that takes pre-sectioned input.
+ * The LLM's job is reduced to prose-writing — selection, sectioning, and dedup
+ * are already done upstream.
+ */
+export function buildSectionedCompilationPrompt(
+  input: SelectedDigestInput,
+  weather: WeatherData[],
+  markets: MarketData,
+  feedStats: { total: number; failed: number },
+): string {
+  const today = new Date();
+  const dateStr = today.toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const sourcesNote = feedStats.failed > 0
+    ? `${feedStats.total - feedStats.failed} of ${feedStats.total} sources responded`
+    : `${feedStats.total} sources`;
+
+  // Serialize sections as JSON so the LLM knows exactly what to format.
+  const sectionsJson = JSON.stringify(input.sections, null, 2);
+  const gapsJson = JSON.stringify(input.gaps ?? [], null, 2);
+  const weatherJson = JSON.stringify(weather, null, 2);
+  const marketsJson = JSON.stringify(markets, null, 2);
+
+  return `You are writing a daily news digest for Filip in Pegeia, Cyprus (ties to Poland, follows technology, climate, science, global politics, business).
+
+**IMPORTANT: stories have ALREADY been selected, sectioned, and deduplicated upstream. Your job is ONLY to format each section and write prose. Do NOT:**
+- re-select stories (use every story provided, unless truly none exist in a section)
+- move stories between sections
+- drop stories
+- add stories from elsewhere
+- mention the same event in two different sections
+
+## FORMAT RULES BY SECTION
+
+The sections come pre-formatted in a JSON array. Each section has a "format" field:
+
+**format: "prose"** — 3-6 sentences per story. Structure:
+\`\`\`
+**Bold Headline**
+
+Story prose here, 3-6 sentences with key facts, figures, quotes, context. ([Source Name](url))
+
+**Next Headline**
+
+Next prose. ([Source](url))
+\`\`\`
+
+**format: "bullets"** — one line per story. Structure:
+\`\`\`
+- **Bold prefix**: one-sentence summary. ([Source](url))
+\`\`\`
+Bold prefix examples: for happened-in-the-world, use country ("**Kazakhstan**"); for sports, use competition ("**Champions League**", "**Premier League**", "**NBA**"); for culture, use type ("**Film**", "**Music**", "**Art**", "**Polish culture**").
+
+**format: "editorial"** — 2-3 sentences summarising the argument:
+\`\`\`
+**Bold Title**
+
+2-3 sentence summary of what the piece argues and why it matters. ([Source](url))
+\`\`\`
+
+## MULTI-SOURCE ATTRIBUTION
+
+If a story has "all_sources" with multiple entries:
+- Name 2-3 outlets explicitly: "According to BBC, Reuters, and France 24..." or "...reported by [BBC](url), [Reuters](url), and [France 24](url)"
+- If entries have "angle" fields: describe each perspective by name. "BBC focused on the humanitarian toll, while Al Jazeera emphasised the diplomatic fallout"
+- If "conflicting" is true: explicitly contrast. "Western outlets (BBC, Reuters) reported X, while TASS framed the situation as Y"
+
+## GAPS
+
+After a section, if input.gaps lists a note for that section, emit the note as a single italicised line. Example: *No major Ukraine developments in today's feeds.*
+
+## OUTPUT STRUCTURE (follow exactly)
+
+# Daily News Digest — ${dateStr}
+
+*Compiled from ${sourcesNote}. All stories from the last 24 hours. Cross-referenced across outlets.*
+
+---
+
+[For each section in input.sections (already in correct order), emit:
+## {section.header}
+
+{formatted stories per section.format}
+
+{gap note if any, as italic line}
+
+---
+]
+
+## 📈 Markets & Macro
+
+| Index / Asset | Value | Change |
+|---|---|---|
+[market table rows]
+
+**Market Commentary**
+
+[1-2 sentences on what drove markets today, using market data provided]
+
+**Macro & Inflation Watch**
+
+[3-5 sentences on the most significant macroeconomic developments — CPI/PPI prints, central bank decisions, GDP/employment/trade data, IMF/World Bank forecasts, tariffs/sanctions. If none today, note what's coming up this week. Always cite sources.]
+
+---
+
+## 🌤️ Weather Forecast
+
+### Pegeia, Cyprus (next 3 days)
+| Day | Conditions | High / Low |
+|---|---|---|
+[rows]
+
+### Gdańsk, Poland (next 3 days)
+| Day | Conditions | High / Low |
+|---|---|---|
+[rows]
+
+---
+*Generated automatically by AI News Digest. [Read the full digest online.](https://ainewsworker.rogaczewski-dev.workers.dev/)*
+
+## GUIDELINES
+
+- Target ~2,800-3,800 words total
+- Each prose story 3-6 sentences, reader should not need to click through
+- Every story MUST start with **bold headline**, then blank line, then text (for prose format)
+- Bullet stories: single line, **bold prefix**, one sentence, source link
+- Always cite as ([Source Name](url)) — clickable markdown links
+- NO markdown blockquotes (lines starting with \`>\`) — they do not render in email
+- If a section has zero stories, OMIT the entire section (do not emit header + "no stories today")
+
+=== INPUT SECTIONS (ordered, pre-formatted) ===
+${sectionsJson}
+
+=== GAPS ===
+${gapsJson}
+
+=== WEATHER DATA ===
+${weatherJson}
+
+=== MARKET DATA ===
+${marketsJson}`;
 }
