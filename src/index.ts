@@ -269,8 +269,32 @@ async function runPhase2(env: Env, date: string, opts: Phase2Options = {}): Prom
     console.error(`[Phase2] Heartbeat write failed (non-fatal): ${err}`);
   }
 
+  // External heartbeat: ping the uptime monitor if configured. If this ping
+  // stops arriving, the monitor emails us — independent of Cloudflare being
+  // up, so it catches account-level outages our own watchdog can't.
+  await pingExternalHeartbeat(env);
+
   console.log(`[Phase2] Complete for ${date}`);
   return 'success';
+}
+
+// GET the monitor URL on Phase 2 success. Silent no-op if not configured;
+// logs but doesn't throw if the ping fails — a failed ping must never cause
+// us to mark Phase 2 as failed.
+async function pingExternalHeartbeat(env: Env): Promise<void> {
+  if (!env.HEARTBEAT_URL) return;
+  try {
+    const res = await fetch(env.HEARTBEAT_URL, {
+      method: 'GET',
+      // 10s cap — the worker has already done its job; a slow monitor must
+      // not hold up our invocation's wall time.
+      signal: AbortSignal.timeout(10_000),
+    });
+    console.log(`[Heartbeat] External ping → HTTP ${res.status}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`[Heartbeat] External ping failed (non-fatal): ${msg}`);
+  }
 }
 
 // Pull a single field out of digest:{date} without forcing the caller to JSON-parse.
@@ -429,6 +453,15 @@ async function runDryRun(env: Env): Promise<string> {
 async function handleScheduled(event: ScheduledEvent, env: Env): Promise<void> {
   const today = todayUtc();
 
+  if (event.cron === '0 4 * * *') {
+    // Watchdog: 30 min after the retry cron. A separate invocation with its
+    // own 15-min budget, so it runs cleanly even if earlier crons were killed
+    // by the platform (exceededCpu / wall-time) before their own error-email
+    // handlers could fire — which is exactly what happened on 2026-04-23.
+    await runWatchdog(env, today);
+    return;
+  }
+
   if (event.cron === '30 3 * * *') {
     // Retry path. Look at what already succeeded today and re-trigger only
     // the missing phase rather than redoing everything.
@@ -471,6 +504,59 @@ async function handleScheduled(event: ScheduledEvent, env: Env): Promise<void> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[Pipeline] Primary Phase 1 failed (will retry at 03:30): ${msg}`);
+  }
+}
+
+// Watchdog: silent if today's digest shipped, else emails frogaczewski@gmail.com
+// with enough context to diagnose. Summarises which phase completed and points
+// to the recovery endpoint so the fix is a one-liner.
+async function runWatchdog(env: Env, today: string): Promise<void> {
+  const lastSuccess = await env.DIGEST_KV.get('digest:lastSuccess');
+  if (lastSuccess === today) {
+    console.log(`[Watchdog] digest:lastSuccess == ${today} — healthy, no alarm`);
+    return;
+  }
+
+  const phase1Success = await env.DIGEST_KV.get('digest:phase1Success');
+  const phase1Done = phase1Success === today;
+
+  const lines: string[] = [
+    `The ${today} digest has NOT completed by 04:00 UTC.`,
+    '',
+    `digest:lastSuccess   = ${lastSuccess ?? '<unset>'}`,
+    `digest:phase1Success = ${phase1Success ?? '<unset>'}`,
+    '',
+  ];
+
+  if (phase1Done) {
+    lines.push(
+      'Phase 1 succeeded but Phase 2 did not ship. Most likely causes:',
+      '  • Queue message landed in DLQ (check wrangler tail for [DLQ] logs).',
+      '  • Sonnet compilation / email send failing repeatedly.',
+      '',
+      'Fastest recovery — Phase 1 state is still in KV:',
+      '  curl -X POST "https://ainewsworker.rogaczewski-dev.workers.dev/run-phase-2"',
+      '',
+      'If the emailMarkdown was already generated and you just need to resend:',
+      '  curl -X POST "https://ainewsworker.rogaczewski-dev.workers.dev/resend"',
+    );
+  } else {
+    lines.push(
+      'Phase 1 never completed today. Both the 03:00 primary and 03:30 retry',
+      'must have failed or been killed by the platform.',
+      '',
+      'Fastest recovery — full fresh pipeline:',
+      '  curl -X POST --max-time 900 "https://ainewsworker.rogaczewski-dev.workers.dev/run"',
+    );
+  }
+
+  const body = lines.join('\n');
+  console.error(`[Watchdog] ALARM: ${body.split('\n')[0]}`);
+  try {
+    await sendErrorEmail(env, body);
+    console.log('[Watchdog] Alarm email dispatched');
+  } catch (err) {
+    console.error(`[Watchdog] Alarm email failed: ${err}`);
   }
 }
 

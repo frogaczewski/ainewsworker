@@ -9,6 +9,13 @@ export interface Env {
   // Feature flag: switch the triage stage from single Sonnet call over 200 items
   // to parallel Haiku classification over all items. Set to 'true' to enable.
   USE_BATCHED_CLASSIFICATION?: string;
+
+  // Optional: external uptime-monitor ping URL (healthchecks.io, Better Uptime,
+  // cronitor, etc.). Phase 2 GETs this on successful completion; if no ping
+  // arrives within the grace period the external service emails the alarm —
+  // independent of Cloudflare, so it catches account-level outages our own
+  // watchdog can't. Set via `npx wrangler secret put HEARTBEAT_URL`.
+  HEARTBEAT_URL?: string;
 }
 
 // Messages flowing through DIGEST_QUEUE between Phase 1 (cron / /run) and

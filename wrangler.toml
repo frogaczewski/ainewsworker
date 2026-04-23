@@ -55,9 +55,11 @@ max_retries = 0
 max_concurrency = 1
 
 [triggers]
-# 03:00 UTC primary run; 03:30 UTC retry-if-failed (heartbeat-gated, see scheduled handler).
+# 03:00 UTC primary Phase-1; 03:30 UTC retry; 04:00 UTC watchdog that alarms
+# if the day's digest still hasn't shipped (covers the case where an earlier
+# invocation was killed by the platform before its own sendErrorEmail could run).
 # The cron only runs Phase 1 directly — Phase 2 is queue-driven.
-crons = ["0 3 * * *", "30 3 * * *"]
+crons = ["0 3 * * *", "30 3 * * *", "0 4 * * *"]
 
 # All secrets are already set in the Cloudflare dashboard:
 # CLAUDE_PLATFORM_API  — Anthropic API key

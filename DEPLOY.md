@@ -22,6 +22,10 @@ cron 03:30 UTC  ─▶  Retry (heartbeat-gated)
                      • if digest:lastSuccess == today → skip
                      • if digest:phase1Success == today → re-enqueue Phase 2
                      • else → re-run Phase 1, then enqueue Phase 2
+
+cron 04:00 UTC  ─▶  Watchdog
+                     • if digest:lastSuccess == today → silent
+                     • else → email alarm to frogaczewski@gmail.com
 ```
 
 Each phase runs in a **fresh Worker invocation** with its own 15-min wall
@@ -81,7 +85,13 @@ Already set in the Cloudflare dashboard:
 - `MAILJET_API_KEY` — Mailjet public key
 - `MAILJET_SECRET_KEY` — Mailjet secret key
 
-To rotate: `wrangler secret put <NAME>`.
+Optional:
+
+- `HEARTBEAT_URL` — External uptime monitor ping URL (healthchecks.io,
+  Better Uptime, etc.). See "External uptime monitor" below. Unset = ping
+  is a no-op; everything still works without it.
+
+To rotate / set: `wrangler secret put <NAME>`.
 
 ### Environment variables (`wrangler.toml` → `[vars]`)
 
