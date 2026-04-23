@@ -4,10 +4,41 @@ export interface Env {
   MAILJET_SECRET_KEY: string;
 
   DIGEST_KV: KVNamespace;
+  DIGEST_QUEUE: Queue<QueueMessage>;
 
   // Feature flag: switch the triage stage from single Sonnet call over 200 items
   // to parallel Haiku classification over all items. Set to 'true' to enable.
   USE_BATCHED_CLASSIFICATION?: string;
+}
+
+// Messages flowing through DIGEST_QUEUE between Phase 1 (cron / /run) and
+// Phase 2 (queue consumer). The discriminator `kind` keeps it forward-compatible
+// — add a new variant rather than overloading an existing one.
+export type QueueMessage =
+  | {
+      // Standard handoff: Phase 1 wrote phase1:{date} to KV, run Phase 2 now.
+      kind: 'compile-and-send';
+      date: string;
+      testMode?: boolean;
+    }
+  | {
+      // Manual retrigger: skip compile, just resend cached emailMarkdown to all.
+      kind: 'resend';
+      date: string;
+      testMode?: boolean;
+      onlyTo?: { email: string; name: string };
+    };
+
+// Persisted output of Phase 1 — everything Phase 2 needs to compile + send.
+// Lives at `phase1:{date}` in KV, 7-day TTL.
+export interface Phase1Output {
+  date: string;
+  selectedInput: SelectedDigestInput;
+  triagedStories: TriagedStory[];
+  weather: WeatherData[];
+  markets: MarketData;
+  feedStats: { total: number; failed: number; succeeded: number };
+  storyImages: Record<string, string>;
 }
 
 export interface RssFeedConfig {

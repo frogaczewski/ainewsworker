@@ -17,8 +17,46 @@ USE_BATCHED_CLASSIFICATION = "true"
 binding = "DIGEST_KV"
 id = "ef7d3c8046664432a3632f8a5777a95a"
 
+# --- Queues ---
+# Two-phase pipeline: cron runs Phase 1 (data collection → KV) and then enqueues
+# a job; the queue consumer picks it up in a fresh invocation with its own
+# 15-min wall budget and runs Phase 2 (compile + send). This decouples the slow
+# Sonnet compilation from the upstream RSS/classify work, so a slow LLM call
+# can no longer take the whole digest down with it.
+#
+# The queues themselves are NOT created by wrangler — they're a one-time CLI:
+#   npx wrangler queues create ainewsworker-digest
+#   npx wrangler queues create ainewsworker-digest-dlq
+#
+# Producer: cron handler + /run + /resend write here
+[[queues.producers]]
+binding = "DIGEST_QUEUE"
+queue = "ainewsworker-digest"
+
+# Consumer for the main queue. max_batch_size=1 so each digest run gets the
+# full per-invocation budget; max_concurrency=1 so we never have two Phase-2
+# runs racing on the same KV state. Failed messages get up to 2 retries,
+# then move to the DLQ.
+[[queues.consumers]]
+queue = "ainewsworker-digest"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 2
+max_concurrency = 1
+retry_delay = 60
+dead_letter_queue = "ainewsworker-digest-dlq"
+
+# DLQ consumer — no retries, just send an alarm email and ack.
+[[queues.consumers]]
+queue = "ainewsworker-digest-dlq"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 0
+max_concurrency = 1
+
 [triggers]
-# 03:00 UTC primary run; 03:30 UTC retry-if-failed (heartbeat-gated, see scheduled handler)
+# 03:00 UTC primary run; 03:30 UTC retry-if-failed (heartbeat-gated, see scheduled handler).
+# The cron only runs Phase 1 directly — Phase 2 is queue-driven.
 crons = ["0 3 * * *", "30 3 * * *"]
 
 # All secrets are already set in the Cloudflare dashboard:

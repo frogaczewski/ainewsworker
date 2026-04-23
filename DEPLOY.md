@@ -1,5 +1,33 @@
 # AI News Digest Worker — Operating Manual
 
+## Architecture
+
+The pipeline runs in **two phases** connected by a Cloudflare Queue:
+
+```
+cron 03:00 UTC  ─▶  Phase 1 (data collection)          writes phase1:{date} to KV
+                     │                                    writes digest:phase1Success
+                     └─▶ DIGEST_QUEUE.send() ─┐
+                                              ▼
+                                    Phase 2 (compile + send)   reads phase1:{date}
+                                              │                 writes digest:{date}
+                                              │                 writes digest:lastSuccess
+                                              │
+                                  on failure → up to 2 retries with 60s delay
+                                              │
+                                              ▼
+                                    ainewsworker-digest-dlq    sends alarm email
+
+cron 03:30 UTC  ─▶  Retry (heartbeat-gated)
+                     • if digest:lastSuccess == today → skip
+                     • if digest:phase1Success == today → re-enqueue Phase 2
+                     • else → re-run Phase 1, then enqueue Phase 2
+```
+
+Each phase runs in a **fresh Worker invocation** with its own 15-min wall
+budget. A slow Sonnet call in Phase 2 can no longer consume time that Phase 1
+needs (and vice versa).
+
 ## Deploy
 
 Deploys happen **automatically on push to GitHub**. CI picks up the change,
@@ -14,14 +42,33 @@ git push
 No manual `wrangler deploy` step is needed. If CI fails, check the GitHub
 Actions run for the error.
 
+### One-time setup: create the queues
+
+The two queues referenced in `wrangler.toml` must exist before the worker
+will deploy cleanly. This is a one-time step per Cloudflare account:
+
+```bash
+cd cloudflare-worker
+npx wrangler login        # browser auth
+npx wrangler queues create ainewsworker-digest
+npx wrangler queues create ainewsworker-digest-dlq
+```
+
+To inspect queue state later:
+
+```bash
+npx wrangler queues list
+npx wrangler queues info ainewsworker-digest
+```
+
 ### Manual deploy (fallback)
 
 Only use when CI is broken or you're on a branch that doesn't auto-deploy:
 
 ```bash
 cd cloudflare-worker
-wrangler login        # one-time, opens browser
-wrangler deploy
+npx wrangler login        # one-time, opens browser
+npx wrangler deploy
 ```
 
 ## Configuration
@@ -50,40 +97,80 @@ set.)
 
 ### Scheduled runs
 
-- **03:00 UTC** — primary daily digest
-- **03:30 UTC** — retry, gated by a heartbeat KV key (`digest:lastSuccess`).
-  Runs only if the 03:00 attempt didn't write the heartbeat. Alarms via
-  email if both runs fail.
+- **03:00 UTC** — cron fires **Phase 1** inline, then enqueues a message for
+  Phase 2. The queue consumer picks it up in a fresh invocation.
+- **03:30 UTC** — retry, gated by two heartbeats:
+  - `digest:lastSuccess == today` → everything shipped, skip.
+  - `digest:phase1Success == today` → Phase 1 is done, just re-enqueue Phase 2.
+  - else → re-run Phase 1 and re-enqueue Phase 2.
 
-### Manual triggers (`POST /run`)
+Phase 2 itself auto-retries via the queue (2 retries, 60s delay) before
+landing in the DLQ. The DLQ consumer sends an alarm email.
+
+### Manual triggers
 
 Base URL: `https://ainewsworker.rogaczewski-dev.workers.dev`
 
-Curl stays open for the full run (up to 15 min). Always pass `--max-time 900`
-so curl doesn't bail before the worker finishes.
+For `/run`, `/run-phase-2`, and `/resend` always pass `--max-time 900` so
+curl doesn't bail before a sync run finishes.
+
+#### `POST /run` — full pipeline
 
 | Query param | Effect |
 |---|---|
-| `?dry=true` | Legacy path only — runs fetch + legacy triage, writes `digest:{date}` stories, skips compilation and email. |
-| `?classifyOnly=true` | **Batched path only** — runs Stages 1-3 (classify + dedup), writes `classified:{date}` to KV, stops. Good for "did we even classify the right things?" checks. |
-| `?selectOnly=true` | **Batched path only** — runs Stages 1-4 (classify + dedup + select), writes `selected:{date}` to KV, stops. Good for "did the section balance work?" checks. |
-| `?test=true` | Full pipeline, but emails go only to `frogaczewski@gmail.com` (no Polish recipients). Use this for end-to-end tests. |
-| *(none)* | Full production run — English + Polish emails to all recipients. |
+| *(none)* | Phase 1 sync, Phase 2 enqueued. Returns ~1-3 min after Phase 1 done. |
+| `?test=true` | Phase 1 + Phase 2 **sync**, emails only to Filip. Full end-to-end test. |
+| `?dry=true` | Save triaged stories to KV, skip compilation and emails. |
+| `?classifyOnly=true` | Phase 1 stops after classification; writes `classified:{date}`. |
+| `?selectOnly=true` | Phase 1 stops after selection; writes `selected:{date}` + `phase1:{date}`. |
 
-Examples:
+#### `POST /run-phase-2` — re-trigger Phase 2 alone
+
+Useful when Phase 1 already wrote `phase1:{date}` but Phase 2 never ran
+(e.g. you flipped the queue config mid-day, or Phase 2 hit an API outage
+and you've resolved it).
+
+| Query param | Effect |
+|---|---|
+| `?date=YYYY-MM-DD` | Use a specific day's `phase1:{date}` (default: today). |
+| `?test=true` | Email only Filip. |
+| `?sync=true` | Run inline; without this the job is queued. |
+
+#### `POST /resend` — resend the cached email briefing
+
+Doesn't recompute anything — reads `digest:{date}.emailMarkdown` and sends
+it. Use this when emails need to go out again to everyone (or a subset).
+
+| Query param | Effect |
+|---|---|
+| `?date=YYYY-MM-DD` | Which day's digest to resend (default: today). |
+| `?test=true` | Only to Filip. |
+| `?to=email@example.com` | Only to this single recipient. Uses known name if the address is in `EMAIL_TO` / `EMAIL_TO_PL`, falls back to the local-part otherwise. |
+| `?sync=true` | Send inline; default is queued. |
+
+Returns 404 if there's no `emailMarkdown` cached for that date (i.e. Phase 2
+never completed that day).
+
+#### Examples
 
 ```bash
-# Stage 1-3 only — cheap sanity check before committing to a full run
+# Standard manual run (same as cron)
 curl -X POST --max-time 900 \
-  "https://ainewsworker.rogaczewski-dev.workers.dev/run?classifyOnly=true"
+  "https://ainewsworker.rogaczewski-dev.workers.dev/run"
 
-# End-to-end test, email only to Filip
+# End-to-end test, email only to Filip, sync
 curl -X POST --max-time 900 \
   "https://ainewsworker.rogaczewski-dev.workers.dev/run?test=true"
 
-# Full production run (same as cron)
-curl -X POST --max-time 900 \
-  "https://ainewsworker.rogaczewski-dev.workers.dev/run"
+# Phase 1 ran, Phase 2 didn't — re-kick Phase 2
+curl -X POST "https://ainewsworker.rogaczewski-dev.workers.dev/run-phase-2"
+
+# Resend today's digest to everyone
+curl -X POST "https://ainewsworker.rogaczewski-dev.workers.dev/resend"
+
+# Resend yesterday's digest to a single recipient (for debugging)
+curl -X POST \
+  "https://ainewsworker.rogaczewski-dev.workers.dev/resend?date=2026-04-22&to=frogaczewski@gmail.com"
 ```
 
 ## Observing
@@ -124,13 +211,15 @@ wrangler kv key list --binding=DIGEST_KV --prefix="classified:batch:$(date -u +%
 
 | Key pattern | TTL | Purpose |
 |---|---|---|
-| `classified:batch:{date}:{N}` | 2 hours | Per-batch checkpoint for 03:30 retry resumption |
+| `classified:batch:{date}:{N}` | 2 hours | Per-batch checkpoint for Phase 1 resumption |
 | `classified:{date}` | 7 days | Audit the full classified pool |
 | `selected:{date}` | 7 days | Audit which stories were selected into which section |
+| `phase1:{date}` | 7 days | **Full Phase 1 output** — what Phase 2 reads |
 | `digest:latest` | ∞ | Landing-page source |
-| `digest:{date}` | ∞ | Archive |
+| `digest:{date}` | ∞ | Archive; also read by `/resend` |
 | `articles:index` | ∞ | Date index for pagination |
-| `digest:lastSuccess` | ∞ | Heartbeat for retry cron |
+| `digest:phase1Success` | ∞ | Heartbeat: Phase 1 completed for this date |
+| `digest:lastSuccess` | ∞ | Heartbeat: Phase 2 completed (emails sent) for this date |
 
 ## Troubleshooting
 
@@ -149,14 +238,34 @@ If empty, the 03:00 run died before any batch wrote to KV.
 
 ### Wall-clock over 15 minutes
 
-Check per-stage timings in `wrangler tail`. Classification is usually the
-biggest variable. If it's consistently tight, the safest knob is to move
-the cron to 02:45 UTC in `wrangler.toml`:
+With the two-phase split each phase gets its own 15-min budget — this
+should rarely trigger now. If Phase 1 alone overruns, classification is
+usually the biggest variable. Check per-stage timings in `wrangler tail`.
 
-```toml
-[triggers]
-crons = ["45 2 * * *", "15 3 * * *"]
+### Phase 2 hit the DLQ
+
+The DLQ consumer emails an alarm. To recover:
+
+1. Check `wrangler tail` or the recent logs for the root cause.
+2. If the issue is resolved and Phase 1 state is still intact (check
+   `wrangler kv key get "phase1:$(date -u +%Y-%m-%d)" --binding=DIGEST_KV`),
+   re-kick Phase 2:
+   ```bash
+   curl -X POST "https://ainewsworker.rogaczewski-dev.workers.dev/run-phase-2"
+   ```
+3. If `phase1:{date}` is gone or corrupt, run the full pipeline:
+   ```bash
+   curl -X POST --max-time 900 "https://ainewsworker.rogaczewski-dev.workers.dev/run"
+   ```
+
+### Emails need to go out again to everyone
+
+```bash
+curl -X POST "https://ainewsworker.rogaczewski-dev.workers.dev/resend"
 ```
+
+This reads the cached `emailMarkdown` from `digest:{today}` and resends
+without recomputing anything. For a specific date, add `?date=YYYY-MM-DD`.
 
 ### Rolling back to the legacy pipeline
 
