@@ -286,6 +286,14 @@ Next summary text. ([Source](url))
 - Do NOT use markdown blockquote syntax (lines starting with >)
 - Preserve all markdown formatting: headers, bold, links, tables, horizontal rules
 
+## UNIT NORMALIZATION
+
+The audience is Polish/European. If any non-metric or South-Asian-numbering unit slips through from the full digest, convert it in the condensed output. Write out "million" / "billion" (translation handles Polish scale forms later).
+
+- **South Asian numbering → international**: "crore" = 10,000,000; "lakh" = 100,000. "3.6 crore" → "36 million"; "5 lakh" → "500,000". Never keep "crore" or "lakh".
+- **Imperial → metric**: miles → km, feet → m, inches → cm, pounds → kg, ounces → g, gallons → litres, °F → °C. Round sensibly (1 decimal max; no decimal for distances > 10 km). "12 miles" → "~19 km"; "75°F" → "24°C".
+- **Currency**: keep native currency but add a USD or EUR equivalent in parens for less-familiar currencies (INR, PKR, PHP, NGN, IDR, etc.). Example: "500,000 rupees (~$6,000)". Do NOT convert USD, EUR, GBP, PLN.
+
 ## FULL DIGEST TO CONDENSE
 ${fullDigest}`;
 }
@@ -303,6 +311,8 @@ export function buildTranslationPrompt(digest: string): string {
 8. Nazwy własne (osoby, organizacje, miejsca) zachowaj w oryginalnej pisowni, chyba że istnieje powszechnie używana polska forma (np. "Stany Zjednoczone", "Wielka Brytania", "Cypr")
 9. Zmień "Daily News Digest" na "Codzienny Przegląd Wiadomości" w nagłówku
 10. Zmień stopkę na: *Wygenerowano automatycznie przez AI News Digest*
+11. Przelicz wszystkie jednostki niemetryczne na metryczne przed tłumaczeniem: "crore" (10 000 000) i "lakh" (100 000) zamień na miliony / setki tysięcy; mile → km; stopy → m; cale → cm; funty → kg; uncje → g; galony → litry; °F → °C. Jeśli oryginał ma już przeliczone jednostki (np. "36 million"), zostaw je bez zmian — tylko przetłumacz słowo.
+12. Używaj polskich konwencji liczbowych: skale "mln" i "mld" zamiast "million"/"billion" (np. "36 mln wyborców", "2,5 mld USD"); przecinek jako separator dziesiętny ("3,6 mln", nie "3.6 mln"); spacja jako separator tysięcy ("500 000", nie "500,000"). Stopnie Celsjusza: "24°C" (bez spacji).
 
 Zwróć TYLKO przetłumaczony markdown, bez komentarzy.
 
@@ -496,6 +506,16 @@ If a story has "all_sources" with multiple entries:
 - Name 2-3 outlets explicitly: "According to BBC, Reuters, and France 24..." or "...reported by [BBC](url), [Reuters](url), and [France 24](url)"
 - If entries have "angle" fields: describe each perspective by name. "BBC focused on the humanitarian toll, while Al Jazeera emphasised the diplomatic fallout"
 - If "conflicting" is true: explicitly contrast. "Western outlets (BBC, Reuters) reported X, while TASS framed the situation as Y"
+
+## UNIT NORMALIZATION
+
+The audience is Polish/European. Readers do not know South Asian numbering or imperial units — convert everything to metric / international form before writing. Write out "million" / "billion" (not "mln" / "mld"; translation handles Polish scale forms later).
+
+- **South Asian numbering → international**: "crore" = 10,000,000; "lakh" = 100,000. Examples: "3.6 crore voters" → "36 million voters"; "5 lakh rupees" → "500,000 rupees". Never leave "crore" or "lakh" in the output.
+- **Imperial → metric**: miles → km (×1.609), feet → m (×0.3048), inches → cm (×2.54), pounds → kg (×0.4536), ounces → g (×28.35), gallons → litres (×3.785), °F → °C ((F − 32) × 5/9). Round sensibly: 1 decimal max for most; no decimal for distances over 10 km. Examples: "12 miles" → "~19 km"; "75°F" → "24°C"; "150 pounds" → "68 kg".
+- **Currency**: leave the native currency but add a USD or EUR equivalent in parentheses when the amount is in a less-familiar currency (INR, PKR, PHP, NGN, IDR, BDT, LKR, EGP, NGN, KES, ZAR, ARS, BRL, MXN, VND, etc.). Example: "500,000 rupees (~$6,000)". Do NOT convert USD, EUR, GBP, or PLN — readers know those.
+- **Preserving nuance**: on first mention, you may keep the original in parens if helpful — "36 million (3.6 crore)". On subsequent mentions, use the converted form only.
+- **If the source is already metric/international**: leave it alone.
 
 ## GAPS
 

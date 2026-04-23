@@ -103,9 +103,41 @@ set.)
   - `digest:lastSuccess == today` → everything shipped, skip.
   - `digest:phase1Success == today` → Phase 1 is done, just re-enqueue Phase 2.
   - else → re-run Phase 1 and re-enqueue Phase 2.
+- **04:00 UTC** — **watchdog**. Silent if `digest:lastSuccess == today`.
+  Otherwise emails `frogaczewski@gmail.com` with a diagnosis (which phase
+  completed, which recovery curl to run). Because it's a separate Worker
+  invocation it runs cleanly even when the earlier crons were killed by the
+  platform (exceededCpu / wall-time) before their own error-email handlers
+  could fire — which is exactly what happened on 2026-04-23.
 
 Phase 2 itself auto-retries via the queue (2 retries, 60s delay) before
 landing in the DLQ. The DLQ consumer sends an alarm email.
+
+### External uptime monitor (recommended, belt-and-suspenders)
+
+The in-Worker watchdog catches every Cloudflare-side failure mode we can see
+from inside a Worker — but not an account-level Cloudflare outage. For that,
+Phase 2 also pings an external heartbeat URL on success. If the ping stops
+arriving, the external service emails you directly.
+
+One-time setup with [healthchecks.io](https://healthchecks.io) (free tier):
+
+1. Create a free check. Name it `ainewsworker-digest`.
+2. Set *Schedule* → **Cron** = `0 3 * * *`, *Grace time* = **90 minutes**
+   (covers the 03:00 run + 03:30 retry + 04:00 watchdog window).
+3. Copy the Ping URL (`https://hc-ping.com/<uuid>`).
+4. Add it as a Worker secret:
+   ```bash
+   cd cloudflare-worker
+   npx wrangler secret put HEARTBEAT_URL
+   # paste the URL when prompted
+   ```
+5. Healthchecks.io → Integrations → add your email; enable it for this check.
+
+Same flow works with Better Uptime, Cronitor, or any URL-ping monitor —
+the Worker just fires a `GET` at `env.HEARTBEAT_URL` at the end of Phase 2,
+with a 10-second timeout. If the secret isn't set the ping is a no-op and
+everything still works.
 
 ### Manual triggers
 
@@ -266,6 +298,13 @@ curl -X POST "https://ainewsworker.rogaczewski-dev.workers.dev/resend"
 
 This reads the cached `emailMarkdown` from `digest:{today}` and resends
 without recomputing anything. For a specific date, add `?date=YYYY-MM-DD`.
+
+### A non-metric unit leaked into the digest
+
+The compilation and email-briefing prompts normalize units (crore/lakh, miles,
+°F, pounds, etc.) before writing. If a unit slips through, expand the
+`UNIT NORMALIZATION` list in `src/prompts.ts` to cover the new case, then
+redeploy.
 
 ### Rolling back to the legacy pipeline
 
