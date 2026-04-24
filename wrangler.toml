@@ -18,7 +18,7 @@ USE_BATCHED_CLASSIFICATION = "true"
 # RSS items, sending a labelled email to frogaczewski@gmail.com only. Baseline
 # Claude pipeline is unaffected. See src/providers.ts for the variant registry.
 ENABLE_AB_VARIANTS = "false"
-AB_VARIANT_CONFIGS = "gemini"
+AB_VARIANT_CONFIGS = "gemini,gemini-claude,openai"
 
 # Digest illustration. When "true", Phase 2 generates one Economist-style
 # montage via gpt-image-1 and inlines it on the EMAIL_TO (owner) send only —

@@ -7,7 +7,7 @@ import type { Env } from '../types';
 // Flash vs Pro, etc.).
 export type Tier = 'cheap' | 'standard';
 
-export type ProviderId = 'anthropic' | 'gemini';
+export type ProviderId = 'anthropic' | 'gemini' | 'openai';
 
 export interface LLMProvider {
   readonly id: ProviderId;
