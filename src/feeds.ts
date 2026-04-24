@@ -10,7 +10,7 @@ interface FeedResult {
   feedStatuses: FeedStatus[];
 }
 
-async function fetchSingleFeed(feed: { name: string; url: string; editorial?: boolean }): Promise<{ items: RssItem[]; error?: string }> {
+export async function fetchSingleFeed(feed: { name: string; url: string; editorial?: boolean }): Promise<{ items: RssItem[]; error?: string }> {
   const userAgents = [
     'DailyNewsDigest/2.0 (Cloudflare Worker)',
     'Mozilla/5.0 (compatible; NewsBot/2.0; +https://ainews.rogaczewski.me)',

@@ -105,6 +105,21 @@ export interface Phase1Output {
   markets: MarketData;
   feedStats: { total: number; failed: number; succeeded: number };
   storyImages: Record<string, string>;
+  // Per-interest curated picks (cycling, lodz, …). Keyed by interest id.
+  // Populated by fetchPerPersonInterests in Phase 1; only subscribers listed
+  // in SUBSCRIBER_INTERESTS get the relevant slice appended to their email.
+  // Optional on older cached runs written before this field existed.
+  interestItems?: Record<string, CuratedInterestItem[]>;
+}
+
+// One curated entry in a per-person interest section. Output of the Haiku
+// curation call in src/interests.ts — carries the fields we need to render a
+// bullet with a link and one-sentence blurb.
+export interface CuratedInterestItem {
+  headline: string;
+  blurb: string;
+  source: string;
+  link: string;
 }
 
 export interface RssFeedConfig {

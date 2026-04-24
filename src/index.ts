@@ -23,6 +23,7 @@ import {
 import { sendDigestEmail, sendErrorEmail, type InlineImage } from './email';
 import { generateDigestImage } from './image';
 import { EMAIL_TO, EMAIL_TO_PL } from './config';
+import { fetchPerPersonInterests, renderInterestsFor } from './interests';
 import { buildLandingPage, buildStoryPage, generateSlug } from './landing';
 import {
   confirmSubscriber,
@@ -60,7 +61,15 @@ import {
   sendSubscribeConfirmEmail,
   sendUnsubscribeConfirmEmail,
 } from './subscriber-emails';
-import type { Env, DigestData, Phase1Output, QueueMessage, RssItem, SubscriberLang } from './types';
+import type {
+  CuratedInterestItem,
+  Env,
+  DigestData,
+  Phase1Output,
+  QueueMessage,
+  RssItem,
+  SubscriberLang,
+} from './types';
 
 const WEBSITE_URL = 'https://ainewsworker.rogaczewski-dev.workers.dev';
 const PHASE1_TTL_SECONDS = 604_800; // 7 days
@@ -229,6 +238,15 @@ async function runPhase1(env: Env, opts: Phase1Options = {}): Promise<Phase1Outp
     console.log(`[Phase1] Found ${Object.keys(storyImages).length} story images from RSS feeds`);
   }
 
+  // Per-person interest sections (cycling, etc.). Non-fatal: returns {} on any
+  // issue, which renderInterestsFor treats as "no interest section this run".
+  let interestItems: Record<string, CuratedInterestItem[]> = {};
+  try {
+    interestItems = await fetchPerPersonInterests(env, BASELINE_CONFIG);
+  } catch (err) {
+    console.log(`[Phase1] fetchPerPersonInterests failed (non-fatal): ${err}`);
+  }
+
   const phase1: Phase1Output = {
     date: runDate,
     selectedInput,
@@ -241,6 +259,7 @@ async function runPhase1(env: Env, opts: Phase1Options = {}): Promise<Phase1Outp
       succeeded: feedResult.total - feedResult.failed,
     },
     storyImages,
+    interestItems,
   };
 
   try {
@@ -344,7 +363,7 @@ async function runPhase2(env: Env, date: string, opts: Phase2Options = {}): Prom
   }
 
   // ── Step 6 + 7: translate (parallel) and send ──────────────────────────────
-  await sendAllEmails(env, emailBriefing, { ...opts, inlineImage });
+  await sendAllEmails(env, emailBriefing, { ...opts, inlineImage, interestItems: phase1.interestItems });
 
   // Heartbeat: only after every recipient resolved. The 03:30 retry uses this
   // to decide whether to re-enqueue.
@@ -700,6 +719,10 @@ interface SendOptions {
   // Attached only on the send to EMAIL_TO (owner). Polish recipients never
   // receive it. Generated once per Phase 2 run; resends skip image generation.
   inlineImage?: InlineImage;
+  // Per-interest curated picks from Phase 1 (cycling, etc.). renderInterestsFor
+  // in src/interests.ts decides per-recipient whether a block is appended —
+  // absent / empty means no recipient gets a per-person section.
+  interestItems?: Record<string, CuratedInterestItem[]>;
 }
 
 // Translate to Polish (in parallel with the English send) and dispatch the
@@ -760,6 +783,12 @@ async function sendAllEmails(env: Env, emailBriefing: string, opts: SendOptions 
   const imageForOwner = (email: string): InlineImage | undefined =>
     opts.inlineImage && normalizeEmail(email) === ownerEmail ? opts.inlineImage : undefined;
 
+  // English-only per-person interest injection. Appends a curated subsection
+  // (e.g. 🚴 Cycling) for recipients in SUBSCRIBER_INTERESTS; everyone else
+  // receives the untouched briefing.
+  const enBriefingFor = (email: string): string =>
+    emailBriefing + renderInterestsFor(email, opts.interestItems);
+
   // Only-one-recipient override: send a single message in whichever language
   // matches the recipient list. English by default unless they're in EMAIL_TO_PL
   // or their KV subscriber record is 'pl'.
@@ -774,7 +803,7 @@ async function sendAllEmails(env: Env, emailBriefing: string, opts: SendOptions 
       const polish = await translateToPolish(env, BASELINE_CONFIG, emailBriefing);
       await sendDigestEmail(env, greetedMarkdown(polish, opts.onlyTo.name, true), undefined, opts.onlyTo, plSubject, baselineLabel, unsubToken);
     } else {
-      await sendDigestEmail(env, greetedMarkdown(emailBriefing, opts.onlyTo.name, false), undefined, opts.onlyTo, undefined, baselineLabel, unsubToken, imageForOwner(opts.onlyTo.email));
+      await sendDigestEmail(env, greetedMarkdown(enBriefingFor(opts.onlyTo.email), opts.onlyTo.name, false), undefined, opts.onlyTo, undefined, baselineLabel, unsubToken, imageForOwner(opts.onlyTo.email));
     }
     console.log(`[Email] Sent to single recipient ${opts.onlyTo.email}`);
     return;
@@ -794,7 +823,7 @@ async function sendAllEmails(env: Env, emailBriefing: string, opts: SendOptions 
     console.log('[Email] Test mode — sending only to Filip');
     const filip: DigestRecipient = { email: normalizeEmail(EMAIL_TO.email), name: EMAIL_TO.name, lang: 'en' };
     const unsubToken = await deriveUnsubToken(env, filip.email, 'en');
-    await sendDigestEmail(env, greetedMarkdown(emailBriefing, filip.name, false), undefined, filip, undefined, baselineLabel, unsubToken, imageForOwner(filip.email));
+    await sendDigestEmail(env, greetedMarkdown(enBriefingFor(filip.email), filip.name, false), undefined, filip, undefined, baselineLabel, unsubToken, imageForOwner(filip.email));
     // Drain the translation so it doesn't dangle if waitUntil isn't holding it.
     await polishBriefingPromise.catch(() => undefined);
     return;
@@ -806,7 +835,7 @@ async function sendAllEmails(env: Env, emailBriefing: string, opts: SendOptions 
     const image = imageForOwner(recipient.email);
     const send = () => sendDigestEmail(
       env,
-      greetedMarkdown(emailBriefing, recipient.name, false),
+      greetedMarkdown(enBriefingFor(recipient.email), recipient.name, false),
       undefined,
       { email: recipient.email, name: recipient.name },
       undefined,
@@ -1049,9 +1078,21 @@ async function handleQueue(batch: MessageBatch<QueueMessage>, env: Env): Promise
         if (!cached) throw new Error(`No digest:${body.date} in KV`);
         const data = JSON.parse(cached) as DigestData;
         if (!data.emailMarkdown) throw new Error(`digest:${body.date} has no emailMarkdown`);
+        // Resend the original per-person interest picks too (if that day's Phase 1
+        // wrote any). Missing phase1 record is fine — resend still works without them.
+        let interestItems: Record<string, CuratedInterestItem[]> | undefined;
+        const phase1Raw = await env.DIGEST_KV.get(`phase1:${body.date}`);
+        if (phase1Raw) {
+          try {
+            interestItems = (JSON.parse(phase1Raw) as Phase1Output).interestItems;
+          } catch {
+            // ignore — resend continues without interest sections
+          }
+        }
         await sendAllEmails(env, data.emailMarkdown, {
           testMode: body.testMode,
           onlyTo: body.onlyTo,
+          interestItems,
         });
         msg.ack();
       } else {
@@ -1250,7 +1291,16 @@ export default {
         }
 
         if (sync) {
-          await sendAllEmails(env, data.emailMarkdown, { testMode, onlyTo });
+          let interestItems: Record<string, CuratedInterestItem[]> | undefined;
+          const phase1Raw = await env.DIGEST_KV.get(`phase1:${date}`);
+          if (phase1Raw) {
+            try {
+              interestItems = (JSON.parse(phase1Raw) as Phase1Output).interestItems;
+            } catch {
+              // ignore — sync resend continues without interest sections
+            }
+          }
+          await sendAllEmails(env, data.emailMarkdown, { testMode, onlyTo, interestItems });
           return new Response(
             JSON.stringify({ status: 'sent', date, testMode, onlyTo: onlyTo?.email ?? 'all' }),
             { headers: JSON_HEADERS },

@@ -172,6 +172,62 @@ export const COUNTRIES_OF_INTEREST = ['PL', 'CY', 'NP', 'UA', 'CN', 'DE', 'FR', 
 
 export const CATEGORIES = ['tech_ai', 'climate', 'politics', 'science', 'business', 'health', 'sports', 'culture', 'economics'];
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Per-person interest subsections (cycling, lodz, tczew, paphos, …)
+//
+// Each interest declares its own dedicated RSS feeds plus curation hints for
+// the Haiku-based picker in src/interests.ts. These feeds are NEVER merged
+// into the shared RSS_FEEDS list — they're fetched separately and only
+// rendered on the email of a subscriber listed in SUBSCRIBER_INTERESTS below,
+// so they can't leak into anyone else's digest.
+//
+// To add an interest:
+//   1) add an entry to INTERESTS below with feeds + prompt hints
+//   2) add the subscriber's email → [interest ids] to SUBSCRIBER_INTERESTS
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface InterestDefinition {
+  id: string;
+  title: string;       // section header text, e.g. "Cycling"
+  emoji: string;       // prepended to the header
+  audience: string;    // prompt fragment describing the reader
+  prioritize: string;  // bulleted markdown injected into the curation prompt
+  skip: string;        // bulleted markdown injected into the curation prompt
+  feeds: RssFeedConfig[];
+  topN: number;        // how many items to keep after curation
+}
+
+export const INTERESTS: Record<string, InterestDefinition> = {
+  cycling: {
+    id: 'cycling',
+    title: 'Cycling',
+    emoji: '🚴',
+    audience: 'a cycling enthusiast who follows pro road racing and the wider sport',
+    prioritize: `- Grand tour / monument / world-tour race results and major race news
+- Rider and team news: transfers, retirements, injuries, contract disputes
+- UCI governance, doping cases, significant controversies
+- Major equipment launches from top brands and UCI rule changes`,
+    skip: `- Minor regional, amateur, or junior races
+- Thin gear roundups, listicles ("5 best wheels under £500")
+- Routine weekly race previews with no new angle
+- Generic training-tip or nutrition explainers`,
+    feeds: [
+      { name: 'Cyclingnews', url: 'https://www.cyclingnews.com/rss/news', category: 'cycling' },
+      { name: 'VeloNews', url: 'https://velo.outsideonline.com/feed/', category: 'cycling' },
+      { name: 'road.cc', url: 'https://road.cc/rss.xml', category: 'cycling' },
+      { name: 'BikeRadar', url: 'https://www.bikeradar.com/feeds/news', category: 'cycling' },
+    ],
+    topN: 3,
+  },
+};
+
+// Per-recipient interest opt-in. Keyed by normalized (lowercase) email. A
+// subscriber with no entry here gets the untouched digest — zero behaviour
+// change. Migrate to KV-backed SubscriberRecord.interests once we add a UI.
+export const SUBSCRIBER_INTERESTS: Record<string, string[]> = {
+  'frogaczewski@gmail.com': ['cycling'],
+};
+
 export const EMAIL_FROM = { email: 'ainews@rogaczewski.me', name: 'AI News Digest' };
 export const EMAIL_TO = { email: 'frogaczewski@gmail.com', name: 'Filip Rogaczewski' };
 export const EMAIL_TO_PL = [
