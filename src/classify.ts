@@ -1,4 +1,4 @@
-import { callHaiku } from './llm';
+import { resolveProvider, type VariantConfig } from './providers';
 import { buildClassificationPrompt, buildSemanticDedupPrompt } from './prompts';
 import type {
   Env,
@@ -18,6 +18,7 @@ const MAX_PARALLEL = 3;
 
 export async function classifyInBatches(
   env: Env,
+  config: VariantConfig,
   items: RssItem[],
   date: string,
 ): Promise<ClassifiedItem[]> {
@@ -37,7 +38,7 @@ export async function classifyInBatches(
     const waveIndices = waveBatches.map((_, j) => wave + j);
 
     const settled = await Promise.allSettled(
-      waveBatches.map((batch, j) => classifyOneBatch(env, batch, waveIndices[j], date)),
+      waveBatches.map((batch, j) => classifyOneBatch(env, config, batch, waveIndices[j], date)),
     );
 
     for (let j = 0; j < settled.length; j++) {
@@ -55,31 +56,39 @@ export async function classifyInBatches(
   return results.flat();
 }
 
+interface ClassifiedBatchCache {
+  classifiedBy: { configId: string; model: string; timestamp: number };
+  items: ClassifiedItem[];
+}
+
 async function classifyOneBatch(
   env: Env,
+  config: VariantConfig,
   batch: RssItem[],
   batchIdx: number,
   date: string,
 ): Promise<ClassifiedItem[]> {
-  const kvKey = `classified:batch:${date}:${batchIdx}`;
+  const kvKey = `classified:batch:${date}:${config.id}:${batchIdx}`;
+  const provider = resolveProvider(config, 'cheap');
 
   // Resumption: if the 03:00 run wrote this batch to KV before crashing,
   // the 03:30 retry picks it up instead of re-paying the LLM call.
   try {
     const existing = await env.DIGEST_KV.get(kvKey);
     if (existing) {
-      const parsed = JSON.parse(existing) as ClassifiedItem[];
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        console.log(`[Classify] Batch ${batchIdx}: resumed ${parsed.length} items from KV`);
-        return parsed;
+      const parsed = JSON.parse(existing) as ClassifiedBatchCache;
+      const cachedItems = parsed?.items;
+      if (Array.isArray(cachedItems) && cachedItems.length > 0) {
+        console.log(`[Classify] Batch ${batchIdx} (${config.id}): resumed ${cachedItems.length} items from KV`);
+        return cachedItems;
       }
     }
   } catch (err) {
-    console.log(`[Classify] Batch ${batchIdx}: KV resume failed (${err}), re-running`);
+    console.log(`[Classify] Batch ${batchIdx} (${config.id}): KV resume failed (${err}), re-running`);
   }
 
   const prompt = buildClassificationPrompt(batch);
-  const response = await callHaiku(env, prompt, 8000);
+  const response = await provider.call(env, 'cheap', prompt, 8000);
   const parsed = parseClassifiedJson(response);
 
   // Carry imageUrl from RSS item to classified item (prompt doesn't ask for it)
@@ -93,13 +102,17 @@ async function classifyOneBatch(
     }
   }
 
-  console.log(`[Classify] Batch ${batchIdx}: classified ${parsed.length}/${batch.length} items`);
+  console.log(`[Classify] Batch ${batchIdx} (${config.id}): classified ${parsed.length}/${batch.length} items`);
 
   try {
+    const payload: ClassifiedBatchCache = {
+      classifiedBy: { configId: config.id, model: provider.modelFor('cheap'), timestamp: Date.now() },
+      items: parsed,
+    };
     // 2h TTL — batch outputs only need to survive the 03:30 retry window.
-    await env.DIGEST_KV.put(kvKey, JSON.stringify(parsed), { expirationTtl: 7200 });
+    await env.DIGEST_KV.put(kvKey, JSON.stringify(payload), { expirationTtl: 7200 });
   } catch (err) {
-    console.log(`[Classify] Batch ${batchIdx}: KV write failed (non-fatal): ${err}`);
+    console.log(`[Classify] Batch ${batchIdx} (${config.id}): KV write failed (non-fatal): ${err}`);
   }
 
   return parsed;
@@ -222,16 +235,21 @@ interface DedupGroup {
   rationale?: string;
 }
 
-export async function semanticDedup(env: Env, items: ClassifiedItem[]): Promise<ClassifiedItem[]> {
+export async function semanticDedup(
+  env: Env,
+  config: VariantConfig,
+  items: ClassifiedItem[],
+): Promise<ClassifiedItem[]> {
   if (items.length < 10) {
     console.log(`[Dedup] Skipping semantic dedup (only ${items.length} items)`);
     return items;
   }
 
+  const provider = resolveProvider(config, 'cheap');
   let groupsRaw: string;
   try {
     const prompt = buildSemanticDedupPrompt(items);
-    groupsRaw = await callHaiku(env, prompt, 4000);
+    groupsRaw = await provider.call(env, 'cheap', prompt, 4000);
   } catch (err) {
     console.log(`[Dedup] Semantic dedup LLM call failed: ${err instanceof Error ? err.message : err}`);
     return items;

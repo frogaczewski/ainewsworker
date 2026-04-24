@@ -1,7 +1,13 @@
 import { fetchAllFeeds } from './feeds';
 import { fetchWeather } from './weather';
 import { fetchMarketData } from './markets';
-import { callSonnet } from './llm';
+import {
+  BASELINE_CONFIG,
+  VARIANT_CONFIGS,
+  listEnabledVariantConfigs,
+  resolveProvider,
+  type VariantConfig,
+} from './providers';
 import {
   buildSectionedCompilationPrompt,
   buildEmailBriefingPrompt,
@@ -14,10 +20,47 @@ import {
   selectForDigest,
   selectedToFlat,
 } from './classify';
-import { sendDigestEmail, sendErrorEmail } from './email';
+import { sendDigestEmail, sendErrorEmail, type InlineImage } from './email';
+import { generateDigestImage } from './image';
 import { EMAIL_TO, EMAIL_TO_PL } from './config';
 import { buildLandingPage, buildStoryPage, generateSlug } from './landing';
-import type { Env, DigestData, Phase1Output, QueueMessage } from './types';
+import {
+  confirmSubscriber,
+  createUnsubConfirmToken,
+  deriveUnsubToken,
+  finalizeUnsubscribe,
+  isValidEmail,
+  isValidLang,
+  listActiveSubscribers,
+  loadSuppressionSet,
+  normalizeEmail,
+  startSubscribe,
+  verifyUnsubToken,
+} from './subscribers';
+import {
+  checkAndIncrementIpRateLimit,
+  checkAndIncrementUnsubTokenRateLimit,
+  incrementGlobalSubscribeCounter,
+  shouldFireAlarm,
+} from './ratelimit';
+import {
+  checkInboxPage,
+  confirmInvalidPage,
+  confirmSuccessPage,
+  finalizeSuccessPage,
+  genericErrorPage,
+  invalidRequestPage,
+  rateLimitedPage,
+  unsubscribeConfirmPage,
+  unsubscribeInvalidPage,
+  unsubscribeSentPage,
+} from './subscribe-pages';
+import {
+  sendRateLimitAlarmEmail,
+  sendSubscribeConfirmEmail,
+  sendUnsubscribeConfirmEmail,
+} from './subscriber-emails';
+import type { Env, DigestData, Phase1Output, QueueMessage, RssItem, SubscriberLang } from './types';
 
 const WEBSITE_URL = 'https://ainewsworker.rogaczewski-dev.workers.dev';
 const PHASE1_TTL_SECONDS = 604_800; // 7 days
@@ -104,10 +147,22 @@ async function runPhase1(env: Env, opts: Phase1Options = {}): Promise<Phase1Outp
     return db - da;
   });
 
-  // Step 4: batched Haiku classification (each batch checkpoints to KV).
+  // Cache the raw (sorted) feed for A/B variant pipelines. Variants read from
+  // this cache instead of re-fetching RSS N times. Non-fatal on failure — the
+  // baseline pipeline doesn't depend on the cache.
+  try {
+    await env.DIGEST_KV.put(`rss:${runDate}`, JSON.stringify(sortedItems), {
+      expirationTtl: PHASE1_TTL_SECONDS,
+    });
+  } catch (err) {
+    console.log(`[Phase1] KV write rss:${runDate} failed (non-fatal): ${err}`);
+  }
+
+  // Step 4: batched classification via the baseline variant config's cheap-tier
+  // provider (each batch checkpoints to KV).
   // The legacy Sonnet path has been removed — see commit history if you need it back.
-  console.log(`[Phase1] Step 4 (batched): classifying ${sortedItems.length} items with Haiku...`);
-  const classified = await classifyInBatches(env, sortedItems, runDate);
+  console.log(`[Phase1] Step 4 (batched): classifying ${sortedItems.length} items (${BASELINE_CONFIG.id})...`);
+  const classified = await classifyInBatches(env, BASELINE_CONFIG, sortedItems, runDate);
   console.log(`[Phase1] Classified ${classified.length}/${sortedItems.length} items`);
   if (classified.length === 0) {
     throw new Error('Batched classification returned 0 items — every batch failed');
@@ -117,7 +172,7 @@ async function runPhase1(env: Env, opts: Phase1Options = {}): Promise<Phase1Outp
   const urlDeduped = urlDedupAndDropLow(classified);
 
   // Stage 3b: semantic dedup
-  const fullyDeduped = await semanticDedup(env, urlDeduped);
+  const fullyDeduped = await semanticDedup(env, BASELINE_CONFIG, urlDeduped);
 
   try {
     await env.DIGEST_KV.put(`classified:${runDate}`, JSON.stringify(fullyDeduped), {
@@ -217,6 +272,33 @@ interface Phase2Options {
   testMode?: boolean;
 }
 
+// Compile the full markdown digest using the standard-tier provider for the
+// given config. Pure wrapper over the Sonnet-or-equivalent call — no KV IO.
+async function compileDigest(env: Env, config: VariantConfig, phase1: Phase1Output): Promise<string> {
+  const prompt = buildSectionedCompilationPrompt(
+    phase1.selectedInput,
+    phase1.weather,
+    phase1.markets,
+    { total: phase1.feedStats.total, failed: phase1.feedStats.failed },
+  );
+  const provider = resolveProvider(config, 'standard');
+  return provider.call(env, 'standard', prompt, 16000);
+}
+
+// Build the email-length briefing from the full digest, then rewrite generic
+// website links to per-story /story/{date}/{slug} URLs.
+async function buildEmailBriefing(
+  env: Env,
+  config: VariantConfig,
+  fullDigest: string,
+  date: string,
+): Promise<string> {
+  const prompt = buildEmailBriefingPrompt(fullDigest, WEBSITE_URL);
+  const provider = resolveProvider(config, 'standard');
+  const briefingRaw = await provider.call(env, 'standard', prompt, 16000);
+  return rewriteStoryLinks(briefingRaw, WEBSITE_URL, date);
+}
+
 async function runPhase2(env: Env, date: string, opts: Phase2Options = {}): Promise<string> {
   console.log(`[Phase2] Starting compile+send for ${date} (testMode=${!!opts.testMode})`);
 
@@ -226,19 +308,13 @@ async function runPhase2(env: Env, date: string, opts: Phase2Options = {}): Prom
   }
   const phase1: Phase1Output = JSON.parse(raw);
 
-  // ── Step 5a: compile full digest with Sonnet ───────────────────────────────
+  // ── Step 5a: compile full digest ───────────────────────────────────────────
   let fullDigest = await readCachedDigestField(env, date, 'digestMarkdown');
   if (fullDigest) {
     console.log(`[Phase2] Reusing cached digestMarkdown (${fullDigest.length} chars)`);
   } else {
-    console.log('[Phase2] Step 5a: Compiling full digest with Sonnet...');
-    const compilationPrompt = buildSectionedCompilationPrompt(
-      phase1.selectedInput,
-      phase1.weather,
-      phase1.markets,
-      { total: phase1.feedStats.total, failed: phase1.feedStats.failed },
-    );
-    fullDigest = await callSonnet(env, compilationPrompt);
+    console.log(`[Phase2] Step 5a: Compiling full digest (${BASELINE_CONFIG.id})...`);
+    fullDigest = await compileDigest(env, BASELINE_CONFIG, phase1);
     console.log(`[Phase2] Full digest compiled (${fullDigest.length} characters)`);
 
     // Persist immediately so a Step 5b failure doesn't force us to recompile.
@@ -250,16 +326,25 @@ async function runPhase2(env: Env, date: string, opts: Phase2Options = {}): Prom
   if (emailBriefing) {
     console.log(`[Phase2] Reusing cached emailMarkdown (${emailBriefing.length} chars)`);
   } else {
-    console.log('[Phase2] Step 5b: Generating email briefing...');
-    const briefingRaw = await callSonnet(env, buildEmailBriefingPrompt(fullDigest, WEBSITE_URL));
-    emailBriefing = rewriteStoryLinks(briefingRaw, WEBSITE_URL, date);
+    console.log(`[Phase2] Step 5b: Generating email briefing (${BASELINE_CONFIG.id})...`);
+    emailBriefing = await buildEmailBriefing(env, BASELINE_CONFIG, fullDigest, date);
     console.log(`[Phase2] Email briefing compiled (${emailBriefing.length} characters)`);
 
     await persistDigest(env, phase1, { digestMarkdown: fullDigest, emailMarkdown: emailBriefing });
   }
 
+  // ── Step 5c: generate illustration (owner-only, gated by ENABLE_DIGEST_IMAGE) ──
+  let inlineImage: InlineImage | undefined;
+  if (env.ENABLE_DIGEST_IMAGE === 'true') {
+    const img = await generateDigestImage(env, emailBriefing).catch(err => {
+      console.log(`[Phase2] Image generation threw (non-fatal): ${err instanceof Error ? err.message : err}`);
+      return null;
+    });
+    if (img) inlineImage = img;
+  }
+
   // ── Step 6 + 7: translate (parallel) and send ──────────────────────────────
-  await sendAllEmails(env, emailBriefing, opts);
+  await sendAllEmails(env, emailBriefing, { ...opts, inlineImage });
 
   // Heartbeat: only after every recipient resolved. The 03:30 retry uses this
   // to decide whether to re-enqueue.
@@ -276,6 +361,262 @@ async function runPhase2(env: Env, date: string, opts: Phase2Options = {}): Prom
 
   console.log(`[Phase2] Complete for ${date}`);
   return 'success';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// A/B variant pipelines. For each enabled variant config, run a full
+// classify → compile → send flow on the same day's raw RSS cache and deliver
+// a single labelled email to the configured recipient (frogaczewski@gmail.com
+// by default). Baseline Claude pipeline is untouched — variants use isolated
+// KV keys suffixed with the config id and cannot interfere with the main
+// digest or the landing page.
+// ──────────────────────────────────────────────────────────────────────────────
+
+// Enqueue one variant message per enabled config for the given date. Caller
+// is expected to have already enqueued the baseline `compile-and-send`.
+async function enqueueVariants(env: Env, date: string): Promise<void> {
+  const variants = listEnabledVariantConfigs(env);
+  if (variants.length === 0) return;
+  for (const config of variants) {
+    try {
+      await env.DIGEST_QUEUE.send({
+        kind: 'compile-and-send',
+        date,
+        variant: { configId: config.id, recipient: EMAIL_TO },
+      });
+      console.log(`[Variants] Enqueued "${config.id}" for ${date} → ${EMAIL_TO.email}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Variants] Failed to enqueue "${config.id}": ${msg}`);
+    }
+  }
+}
+
+interface VariantCoreInput {
+  sortedItems: RssItem[];
+  weather: Phase1Output['weather'];
+  markets: Phase1Output['markets'];
+  feedStats: Phase1Output['feedStats'];
+}
+
+interface VariantCoreOptions {
+  persistKv: boolean;
+  subjectPrefix?: string;
+  logTag?: string; // defaults to "Variant"
+  // 'pl' (default) — translate briefing to Polish, Polish subject + greeting.
+  // 'en' — skip translation, ship the English briefing as-is.
+  language?: 'en' | 'pl';
+}
+
+// Shared classify → compile → brief → translate → send pipeline for any variant
+// config. Used by both the queued production variant (runVariantPipeline) and
+// the synchronous test endpoint (runTestVariant). KV writes are opt-in so
+// test runs don't overwrite production variant state.
+async function runVariantCore(
+  env: Env,
+  config: VariantConfig,
+  date: string,
+  input: VariantCoreInput,
+  recipient: { email: string; name: string },
+  opts: VariantCoreOptions,
+): Promise<void> {
+  const tag = opts.logTag ?? 'Variant';
+
+  const classified = await classifyInBatches(env, config, input.sortedItems, date);
+  if (classified.length === 0) {
+    throw new Error(`[${tag} ${config.id}] classification returned 0 items`);
+  }
+  const urlDeduped = urlDedupAndDropLow(classified);
+  const fullyDeduped = await semanticDedup(env, config, urlDeduped);
+  const selectedInput = selectForDigest(fullyDeduped);
+  const triagedStories = selectedToFlat(selectedInput);
+
+  // Carry imageUrl from RSS items (classification prompts don't request it).
+  const imagesByLink = new Map<string, string>();
+  for (const item of input.sortedItems) {
+    if (item.imageUrl && item.link) imagesByLink.set(item.link, item.imageUrl);
+  }
+  for (const story of triagedStories) {
+    if (!story.imageUrl && story.link && imagesByLink.has(story.link)) {
+      story.imageUrl = imagesByLink.get(story.link);
+    }
+  }
+  const storyImages: Record<string, string> = {};
+  for (const story of triagedStories) {
+    if (story.imageUrl && story.link) {
+      const baseUrl = story.link.split('?')[0];
+      storyImages[baseUrl] = story.imageUrl;
+      if (baseUrl !== story.link) storyImages[story.link] = story.imageUrl;
+    }
+  }
+
+  const phase1Variant: Phase1Output = {
+    date,
+    selectedInput,
+    triagedStories,
+    weather: input.weather,
+    markets: input.markets,
+    feedStats: input.feedStats,
+    storyImages,
+  };
+
+  const producedBy = {
+    configId: config.id,
+    classifyModel: resolveProvider(config, 'cheap').modelFor('cheap'),
+    composeModel: resolveProvider(config, 'standard').modelFor('standard'),
+    timestamp: Date.now(),
+  };
+
+  if (opts.persistKv) {
+    try {
+      await env.DIGEST_KV.put(
+        `phase1:${date}:${config.id}`,
+        JSON.stringify({ ...phase1Variant, producedBy }),
+        { expirationTtl: PHASE1_TTL_SECONDS },
+      );
+    } catch (err) {
+      console.log(`[${tag} ${config.id}] KV write phase1:${date}:${config.id} failed (non-fatal): ${err}`);
+    }
+  }
+
+  const language = opts.language ?? 'pl';
+
+  const fullDigest = await compileDigest(env, config, phase1Variant);
+  console.log(`[${tag} ${config.id}] Full digest compiled (${fullDigest.length} chars)`);
+  const emailBriefing = await buildEmailBriefing(env, config, fullDigest, date);
+  console.log(`[${tag} ${config.id}] Email briefing compiled (${emailBriefing.length} chars)`);
+  const finalBriefing = language === 'pl'
+    ? await translateToPolish(env, config, emailBriefing)
+    : emailBriefing;
+
+  if (opts.persistKv) {
+    try {
+      const variantDigest: DigestData & { producedBy: typeof producedBy } = {
+        date,
+        stories: triagedStories,
+        weather: input.weather,
+        markets: input.markets,
+        feedStats: { total: input.feedStats.total, succeeded: input.feedStats.succeeded },
+        storyImages,
+        digestMarkdown: fullDigest,
+        emailMarkdown: emailBriefing,
+        producedBy,
+      };
+      await env.DIGEST_KV.put(`digest:${date}:${config.id}`, JSON.stringify(variantDigest), {
+        expirationTtl: PHASE1_TTL_SECONDS,
+      });
+    } catch (err) {
+      console.log(`[${tag} ${config.id}] KV write digest:${date}:${config.id} failed (non-fatal): ${err}`);
+    }
+  }
+
+  const now = new Date();
+  const subject = language === 'pl'
+    ? `${opts.subjectPrefix ?? ''}Codzienny Przegląd Wiadomości — ${now.toLocaleDateString('pl-PL', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+      })}`
+    : `${opts.subjectPrefix ?? ''}Daily News Digest — ${now.toLocaleDateString('en-GB', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+      })}`;
+  // Don't wrap with greetedMarkdown — sendDigestEmail's HTML template already
+  // injects a "☕ Good morning / Dzień dobry" greeting based on the subject.
+  // Wrapping here would produce two greetings in the email body.
+  await sendDigestEmail(
+    env,
+    finalBriefing,
+    undefined,
+    recipient,
+    subject,
+    config.label,
+  );
+  console.log(`[${tag} ${config.id}] Email dispatched to ${recipient.email} (${language})`);
+}
+
+// Production variant pipeline: reads RSS + baseline weather/markets from KV
+// (populated by the most recent Phase 1 run) and persists variant state.
+async function runVariantPipeline(
+  env: Env,
+  config: VariantConfig,
+  date: string,
+  recipient: { email: string; name: string },
+): Promise<void> {
+  console.log(`[Variant ${config.id}] Starting pipeline for ${date} → ${recipient.email}`);
+
+  const rssRaw = await env.DIGEST_KV.get(`rss:${date}`);
+  if (!rssRaw) {
+    throw new Error(`[Variant ${config.id}] No rss:${date} in KV — baseline Phase 1 didn't complete`);
+  }
+  const sortedItems: RssItem[] = JSON.parse(rssRaw);
+
+  // Weather + market data are genuinely provider-agnostic — reuse baseline's
+  // fetched values rather than re-fetching.
+  const baselineRaw = await env.DIGEST_KV.get(`phase1:${date}`);
+  if (!baselineRaw) {
+    throw new Error(`[Variant ${config.id}] No phase1:${date} in KV — baseline Phase 1 didn't complete`);
+  }
+  const baseline: Phase1Output = JSON.parse(baselineRaw);
+
+  await runVariantCore(
+    env,
+    config,
+    date,
+    {
+      sortedItems,
+      weather: baseline.weather,
+      markets: baseline.markets,
+      feedStats: baseline.feedStats,
+    },
+    recipient,
+    { persistKv: true },
+  );
+}
+
+// Test endpoint: fetches fresh RSS + weather + markets and runs the full
+// variant pipeline synchronously, sending one email to EMAIL_TO with a
+// `[TEST]` subject prefix. Language is caller-selected — 'pl' (default)
+// translates to Polish, 'en' ships the briefing as-is. Skips all KV writes
+// so production variant state (`phase1:{date}:{configId}`,
+// `digest:{date}:{configId}`) is untouched.
+async function runTestVariant(
+  env: Env,
+  config: VariantConfig,
+  language: 'en' | 'pl' = 'pl',
+): Promise<void> {
+  console.log(`[TestVariant ${config.id}] Starting fresh sync test run (lang=${language})`);
+
+  const [feedResult, weather, markets] = await Promise.all([
+    fetchAllFeeds(),
+    fetchWeather(),
+    fetchMarketData(),
+  ]);
+
+  if (feedResult.items.length === 0) {
+    throw new Error('No RSS items fetched — all feeds failed');
+  }
+
+  const sortedItems = [...feedResult.items].sort((a, b) => {
+    const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
+    const db = b.pubDate ? new Date(b.pubDate).getTime() : 0;
+    return db - da;
+  });
+
+  await runVariantCore(
+    env,
+    config,
+    todayUtc(),
+    {
+      sortedItems,
+      weather,
+      markets,
+      feedStats: {
+        total: feedResult.total,
+        failed: feedResult.failed,
+        succeeded: feedResult.total - feedResult.failed,
+      },
+    },
+    EMAIL_TO,
+    { persistKv: false, subjectPrefix: '[TEST] ', logTag: 'TestVariant', language },
+  );
 }
 
 // GET the monitor URL on Phase 2 success. Silent no-op if not configured;
@@ -356,11 +697,54 @@ async function persistDigest(
 interface SendOptions {
   testMode?: boolean;
   onlyTo?: { email: string; name: string };
+  // Attached only on the send to EMAIL_TO (owner). Polish recipients never
+  // receive it. Generated once per Phase 2 run; resends skip image generation.
+  inlineImage?: InlineImage;
 }
 
 // Translate to Polish (in parallel with the English send) and dispatch the
 // English digest + every Polish recipient. Used by both the cron path
-// (via runPhase2) and the manual /resend endpoint.
+// (via runPhase2) and the manual /resend endpoint. The baseline cron path
+// always uses BASELINE_CONFIG; variant pipelines call translateToPolish
+// directly with their own config.
+interface DigestRecipient {
+  email: string;
+  name: string;
+  lang: SubscriberLang;
+}
+
+/**
+ * Union hardcoded recipients (config.ts) with active KV subscribers, then
+ * subtract anyone in the suppression overlay. Called once per send — cheap
+ * at expected scale (~20-100 recipients, ~3 KV reads per email).
+ */
+async function resolveDigestRecipients(
+  env: Env,
+  lang: SubscriberLang,
+): Promise<DigestRecipient[]> {
+  const hardcoded: DigestRecipient[] = lang === 'pl'
+    ? EMAIL_TO_PL.map(r => ({ email: normalizeEmail(r.email), name: r.name, lang: 'pl' }))
+    : [{ email: normalizeEmail(EMAIL_TO.email), name: EMAIL_TO.name, lang: 'en' }];
+
+  const kv = await listActiveSubscribers(env, lang);
+  const kvEmails = new Set(kv.map(s => s.email));
+  const hardcodedMinusKv = hardcoded.filter(r => !kvEmails.has(r.email));
+
+  const unioned: DigestRecipient[] = [
+    ...hardcodedMinusKv,
+    ...kv.map(s => ({
+      email: s.email,
+      name: s.name && s.name.trim().length > 0 ? s.name : s.email,
+      lang,
+    } as DigestRecipient)),
+  ];
+
+  if (unioned.length === 0) return unioned;
+
+  const suppressed = await loadSuppressionSet(env, unioned.map(r => r.email));
+  return unioned.filter(r => !suppressed.has(r.email));
+}
+
 async function sendAllEmails(env: Env, emailBriefing: string, opts: SendOptions = {}): Promise<void> {
   const today = new Date();
   const plDateStr = today.toLocaleDateString('pl-PL', {
@@ -371,36 +755,74 @@ async function sendAllEmails(env: Env, emailBriefing: string, opts: SendOptions 
   });
   const plSubject = `Codzienny Przegląd Wiadomości — ${plDateStr}`;
 
-  // Onlt-one-recipient override: send a single message in whichever language
-  // matches the recipient list. English by default unless they're in EMAIL_TO_PL.
+  const baselineLabel = BASELINE_CONFIG.label;
+  const ownerEmail = normalizeEmail(EMAIL_TO.email);
+  const imageForOwner = (email: string): InlineImage | undefined =>
+    opts.inlineImage && normalizeEmail(email) === ownerEmail ? opts.inlineImage : undefined;
+
+  // Only-one-recipient override: send a single message in whichever language
+  // matches the recipient list. English by default unless they're in EMAIL_TO_PL
+  // or their KV subscriber record is 'pl'.
   if (opts.onlyTo) {
-    const isPl = EMAIL_TO_PL.some(r => r.email.toLowerCase() === opts.onlyTo!.email.toLowerCase());
+    const normTo = normalizeEmail(opts.onlyTo.email);
+    const isHardcodedPl = EMAIL_TO_PL.some(r => normalizeEmail(r.email) === normTo);
+    const kvPlEmails = new Set((await listActiveSubscribers(env, 'pl')).map(s => s.email));
+    const isPl = isHardcodedPl || kvPlEmails.has(normTo);
+    const unsubLang: SubscriberLang = isPl ? 'pl' : 'en';
+    const unsubToken = await deriveUnsubToken(env, normTo, unsubLang);
     if (isPl) {
-      const polish = await translateToPolish(env, emailBriefing);
-      await sendDigestEmail(env, greetedMarkdown(polish, opts.onlyTo.name, true), undefined, opts.onlyTo, plSubject);
+      const polish = await translateToPolish(env, BASELINE_CONFIG, emailBriefing);
+      await sendDigestEmail(env, greetedMarkdown(polish, opts.onlyTo.name, true), undefined, opts.onlyTo, plSubject, baselineLabel, unsubToken);
     } else {
-      await sendDigestEmail(env, greetedMarkdown(emailBriefing, opts.onlyTo.name, false), undefined, opts.onlyTo);
+      await sendDigestEmail(env, greetedMarkdown(emailBriefing, opts.onlyTo.name, false), undefined, opts.onlyTo, undefined, baselineLabel, unsubToken, imageForOwner(opts.onlyTo.email));
     }
     console.log(`[Email] Sent to single recipient ${opts.onlyTo.email}`);
     return;
   }
 
-  // Kick off Polish translation in parallel — English send doesn't wait on it.
-  const polishBriefingPromise = translateToPolish(env, emailBriefing);
+  // Resolve recipients (hardcoded ∪ KV, minus suppressed) in parallel with the
+  // Polish translation so neither blocks the other.
+  const [enRecipients, plRecipients, polishBriefingPromise] = [
+    resolveDigestRecipients(env, 'en'),
+    resolveDigestRecipients(env, 'pl'),
+    translateToPolish(env, BASELINE_CONFIG, emailBriefing),
+  ];
+
+  const [enList, plList] = await Promise.all([enRecipients, plRecipients]);
 
   if (opts.testMode) {
     console.log('[Email] Test mode — sending only to Filip');
-    await sendDigestEmail(env, greetedMarkdown(emailBriefing, EMAIL_TO.name, false));
+    const filip: DigestRecipient = { email: normalizeEmail(EMAIL_TO.email), name: EMAIL_TO.name, lang: 'en' };
+    const unsubToken = await deriveUnsubToken(env, filip.email, 'en');
+    await sendDigestEmail(env, greetedMarkdown(emailBriefing, filip.name, false), undefined, filip, undefined, baselineLabel, unsubToken, imageForOwner(filip.email));
     // Drain the translation so it doesn't dangle if waitUntil isn't holding it.
     await polishBriefingPromise.catch(() => undefined);
     return;
   }
 
-  await sendDigestEmail(env, greetedMarkdown(emailBriefing, EMAIL_TO.name, false)).catch(async () => {
-    console.log('[Email] English send failed, retrying once...');
-    await sendDigestEmail(env, greetedMarkdown(emailBriefing, EMAIL_TO.name, false));
-  });
-  console.log('[Email] English email dispatched');
+  const enTasks: Promise<void>[] = [];
+  for (const recipient of enList) {
+    const unsubToken = await deriveUnsubToken(env, recipient.email, 'en');
+    const image = imageForOwner(recipient.email);
+    const send = () => sendDigestEmail(
+      env,
+      greetedMarkdown(emailBriefing, recipient.name, false),
+      undefined,
+      { email: recipient.email, name: recipient.name },
+      undefined,
+      baselineLabel,
+      unsubToken,
+      image,
+    );
+    enTasks.push(
+      send().catch(async () => {
+        console.log(`[Email] English to ${recipient.email} failed, retrying once...`);
+        await send();
+      }),
+    );
+  }
+  await Promise.all(enTasks);
+  console.log(`[Email] English emails dispatched (${enList.length} recipients)`);
 
   const polishBriefing = await polishBriefingPromise;
   if (!polishBriefing) {
@@ -408,28 +830,42 @@ async function sendAllEmails(env: Env, emailBriefing: string, opts: SendOptions 
     return;
   }
 
-  const tasks: Promise<void>[] = [];
-  for (const plRecipient of EMAIL_TO_PL) {
-    tasks.push(
-      sendDigestEmail(env, greetedMarkdown(polishBriefing, plRecipient.name, true), undefined, plRecipient, plSubject)
-        .catch(async () => {
-          console.log(`[Email] Polish to ${plRecipient.email} failed, retrying once...`);
-          await sendDigestEmail(env, greetedMarkdown(polishBriefing, plRecipient.name, true), undefined, plRecipient, plSubject);
-        }),
+  const plTasks: Promise<void>[] = [];
+  for (const recipient of plList) {
+    const unsubToken = await deriveUnsubToken(env, recipient.email, 'pl');
+    const send = () => sendDigestEmail(
+      env,
+      greetedMarkdown(polishBriefing, recipient.name, true),
+      undefined,
+      { email: recipient.email, name: recipient.name },
+      plSubject,
+      baselineLabel,
+      unsubToken,
+    );
+    plTasks.push(
+      send().catch(async () => {
+        console.log(`[Email] Polish to ${recipient.email} failed, retrying once...`);
+        await send();
+      }),
     );
   }
-  await Promise.all(tasks);
-  console.log(`[Email] All Polish emails dispatched (${EMAIL_TO_PL.length} recipients)`);
+  await Promise.all(plTasks);
+  console.log(`[Email] All Polish emails dispatched (${plList.length} recipients)`);
 }
 
-async function translateToPolish(env: Env, emailBriefing: string): Promise<string> {
+async function translateToPolish(
+  env: Env,
+  config: VariantConfig,
+  emailBriefing: string,
+): Promise<string> {
   try {
-    const translated = await callSonnet(env, buildTranslationPrompt(emailBriefing));
-    console.log(`[Email] Polish translation: ${translated.length} characters`);
+    const provider = resolveProvider(config, 'standard');
+    const translated = await provider.call(env, 'standard', buildTranslationPrompt(emailBriefing), 16000);
+    console.log(`[Email] Polish translation (${config.id}): ${translated.length} characters`);
     return translated;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.log(`[Email] Polish translation failed, falling back to English: ${msg}`);
+    console.log(`[Email] Polish translation (${config.id}) failed, falling back to English: ${msg}`);
     return `> **Uwaga:** Automatyczne tłumaczenie było dziś niedostępne. Poniżej wersja angielska.\n\n---\n\n${emailBriefing}`;
   }
 }
@@ -476,6 +912,7 @@ async function handleScheduled(event: ScheduledEvent, env: Env): Promise<void> {
       console.log('[Retry] Phase 1 already done — re-enqueueing Phase 2');
       try {
         await env.DIGEST_QUEUE.send({ kind: 'compile-and-send', date: today });
+        await enqueueVariants(env, today);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[Retry] Failed to enqueue Phase 2: ${msg}`);
@@ -488,6 +925,7 @@ async function handleScheduled(event: ScheduledEvent, env: Env): Promise<void> {
     try {
       await runPhase1(env);
       await env.DIGEST_QUEUE.send({ kind: 'compile-and-send', date: today });
+      await enqueueVariants(env, today);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[Retry] Phase 1 retry failed: ${msg}`);
@@ -500,6 +938,7 @@ async function handleScheduled(event: ScheduledEvent, env: Env): Promise<void> {
   try {
     await runPhase1(env);
     await env.DIGEST_QUEUE.send({ kind: 'compile-and-send', date: today });
+    await enqueueVariants(env, today);
     console.log('[Pipeline] Phase 1 complete; Phase 2 enqueued');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -590,8 +1029,19 @@ async function handleQueue(batch: MessageBatch<QueueMessage>, env: Env): Promise
     const body = msg.body;
     try {
       if (body.kind === 'compile-and-send') {
-        console.log(`[Queue] compile-and-send for ${body.date} (testMode=${!!body.testMode})`);
-        await runPhase2(env, body.date, { testMode: body.testMode });
+        if (body.variant) {
+          const config = VARIANT_CONFIGS[body.variant.configId];
+          if (!config) {
+            console.error(`[Queue] Unknown variant configId "${body.variant.configId}" — skipping`);
+            msg.ack();
+            continue;
+          }
+          console.log(`[Queue] variant "${config.id}" for ${body.date} → ${body.variant.recipient.email}`);
+          await runVariantPipeline(env, config, body.date, body.variant.recipient);
+        } else {
+          console.log(`[Queue] compile-and-send for ${body.date} (testMode=${!!body.testMode})`);
+          await runPhase2(env, body.date, { testMode: body.testMode });
+        }
         msg.ack();
       } else if (body.kind === 'resend') {
         console.log(`[Queue] resend for ${body.date} (testMode=${!!body.testMode}, onlyTo=${body.onlyTo?.email ?? 'all'})`);
@@ -631,7 +1081,7 @@ export default {
     await handleQueue(batch, env);
   },
 
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // POST /run — full production flow. Runs Phase 1 synchronously (so the
@@ -646,6 +1096,8 @@ export default {
       const testMode = url.searchParams.get('test') === 'true';
       const classifyOnly = url.searchParams.get('classifyOnly') === 'true';
       const selectOnly = url.searchParams.get('selectOnly') === 'true';
+      const configParam = url.searchParams.get('config');
+      const langParam = url.searchParams.get('lang');
 
       try {
         if (dryRun) {
@@ -666,6 +1118,34 @@ export default {
         }
 
         if (testMode) {
+          // ?config=X runs a full variant pipeline synchronously against the
+          // named config (sent to EMAIL_TO, no KV writes). ?lang=en|pl picks
+          // the output language (defaults to pl). Without config, the baseline
+          // English sync test runs as before.
+          if (configParam) {
+            const config = VARIANT_CONFIGS[configParam];
+            if (!config) {
+              return new Response(
+                JSON.stringify({
+                  status: 'error',
+                  error: `Unknown config "${configParam}". Available: ${Object.keys(VARIANT_CONFIGS).join(', ')}`,
+                }),
+                { status: 400, headers: JSON_HEADERS },
+              );
+            }
+            if (langParam && langParam !== 'en' && langParam !== 'pl') {
+              return new Response(
+                JSON.stringify({ status: 'error', error: `Unknown lang "${langParam}". Use "en" or "pl".` }),
+                { status: 400, headers: JSON_HEADERS },
+              );
+            }
+            const language = (langParam as 'en' | 'pl' | null) ?? 'pl';
+            await runTestVariant(env, config, language);
+            return new Response(
+              JSON.stringify({ status: 'success', test: true, config: config.id, label: config.label, lang: language }),
+              { headers: JSON_HEADERS },
+            );
+          }
           // Sync end-to-end so the caller sees every step.
           const phase1 = await runPhase1(env);
           if (!phase1) throw new Error('Phase 1 returned null in test mode');
@@ -677,11 +1157,13 @@ export default {
         const phase1 = await runPhase1(env);
         if (!phase1) throw new Error('Phase 1 returned null');
         await env.DIGEST_QUEUE.send({ kind: 'compile-and-send', date: phase1.date });
+        await enqueueVariants(env, phase1.date);
         return new Response(
           JSON.stringify({
             status: 'success',
             phase1: `phase1-complete:${phase1.triagedStories.length}`,
             phase2: 'enqueued',
+            variants: listEnabledVariantConfigs(env).map(c => c.id),
           }),
           { headers: JSON_HEADERS },
         );
@@ -859,6 +1341,213 @@ export default {
       });
     }
 
+    // ── Subscribe / unsubscribe endpoints ────────────────────────────────────
+    // Double-opt-in subscribe flow:
+    //   POST /api/subscribe         → pending record + confirmation email
+    //   GET  /confirm               → moves pending → active
+    // Double-opt-out unsubscribe:
+    //   GET  /unsubscribe           → page 1, shows confirm button (HMAC-verified)
+    //   POST /api/unsubscribe       → sends a second confirmation email
+    //   GET  /finalize-unsubscribe  → completes the unsubscribe, sets suppress
+    //
+    // Responses to /api/subscribe are intentionally uniform ("check your inbox")
+    // regardless of whether the email was new, pending, active, or suppressed,
+    // so this endpoint cannot be used to enumerate subscribers. CSRF is not
+    // mitigated because double-opt-in requires inbox access to complete — an
+    // attacker can only cause a confirmation email to be sent, which is the
+    // exact scenario the flow is designed for.
+
+    if (url.pathname === '/api/subscribe' && request.method === 'POST') {
+      try {
+        const { email, lang, name, website, isForm } = await parseSubscribeBody(request);
+
+        if (website && website.trim().length > 0) {
+          // Honeypot tripped — pretend success to avoid giving bots a signal.
+          return subscribeCheckInboxResponse(email || 'your address', isForm);
+        }
+        if (!email || !isValidEmail(email)) {
+          return isForm
+            ? invalidRequestPage('That email address looks invalid. Please try again.')
+            : jsonResponse({ status: 'error', error: 'invalid-email' }, 400);
+        }
+        if (!isValidLang(lang)) {
+          return isForm
+            ? invalidRequestPage('Please choose a language.')
+            : jsonResponse({ status: 'error', error: 'invalid-lang' }, 400);
+        }
+
+        const normEmail = normalizeEmail(email);
+        const ip = request.headers.get('CF-Connecting-IP');
+        const ipCheck = await checkAndIncrementIpRateLimit(env, ip);
+        if (!ipCheck.allowed) {
+          return isForm ? rateLimitedPage() : jsonResponse({ status: 'error', error: 'rate-limited' }, 429);
+        }
+
+        const result = await startSubscribe(env, normEmail, lang, name);
+
+        // Send the confirmation email out-of-band so the form response comes
+        // back immediately. Only send for newly-created/refreshed records —
+        // silent no-op for already-active (enumeration resistance).
+        if (result.action !== 'already-active' && result.pending) {
+          const pending = result.pending;
+          ctx.waitUntil(
+            sendSubscribeConfirmEmail(env, pending.email, pending.name, pending.lang, pending.confirmToken).catch(err => {
+              console.error(`[Subscribe] Confirm email to ${pending.email} failed: ${err}`);
+            }),
+          );
+        } else {
+          console.log(`[Subscribe] Silent no-op for ${normEmail} — already active`);
+        }
+
+        // Global rate-limit counter + alarm. Run in waitUntil so the user is
+        // never blocked on the alarm path.
+        ctx.waitUntil((async () => {
+          try {
+            const count = await incrementGlobalSubscribeCounter(env);
+            if (await shouldFireAlarm(env, count)) {
+              const windowLabel = new Date().toISOString().slice(0, 13);
+              console.log(`[Subscribe] ALARM: ${count} subscribes in window ${windowLabel}`);
+              await sendRateLimitAlarmEmail(env, { globalCount: count, windowLabel });
+            }
+          } catch (err) {
+            console.error(`[Subscribe] Global counter/alarm error: ${err}`);
+          }
+        })());
+
+        return subscribeCheckInboxResponse(normEmail, isForm);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[Subscribe] Error: ${msg}`);
+        return jsonResponse({ status: 'error', error: 'internal' }, 500);
+      }
+    }
+
+    if (url.pathname === '/confirm' && request.method === 'GET') {
+      const token = url.searchParams.get('token');
+      if (!token) return confirmInvalidPage();
+      try {
+        const result = await confirmSubscriber(env, token);
+        if (result.status === 'ok' && result.subscriber) {
+          return confirmSuccessPage(result.subscriber.email, result.subscriber.lang);
+        }
+        return confirmInvalidPage();
+      } catch (err) {
+        console.error(`[Confirm] Error: ${err}`);
+        return genericErrorPage('We could not confirm your subscription. Please try subscribing again.');
+      }
+    }
+
+    if (url.pathname === '/unsubscribe' && request.method === 'GET') {
+      const token = url.searchParams.get('token');
+      if (!token) return unsubscribeInvalidPage();
+      try {
+        const target = await verifyUnsubToken(env, token);
+        if (!target) return unsubscribeInvalidPage();
+        return unsubscribeConfirmPage(token, target.email);
+      } catch (err) {
+        console.error(`[Unsubscribe page] Error: ${err}`);
+        return genericErrorPage('We could not load the unsubscribe page. Please try again.');
+      }
+    }
+
+    if (url.pathname === '/api/unsubscribe' && request.method === 'POST') {
+      try {
+        const token = await parseUnsubscribeBody(request);
+        if (!token) return unsubscribeInvalidPage();
+
+        const tokenRate = await checkAndIncrementUnsubTokenRateLimit(env, token);
+        if (!tokenRate.allowed) {
+          return rateLimitedPage();
+        }
+
+        const target = await verifyUnsubToken(env, token);
+        if (!target) return unsubscribeInvalidPage();
+
+        const confirmToken = await createUnsubConfirmToken(env, target.email, target.lang);
+        ctx.waitUntil(
+          sendUnsubscribeConfirmEmail(env, target.email, target.lang, confirmToken).catch(err => {
+            console.error(`[Unsubscribe] Confirm email to ${target.email} failed: ${err}`);
+          }),
+        );
+        return unsubscribeSentPage();
+      } catch (err) {
+        console.error(`[Unsubscribe POST] Error: ${err}`);
+        return genericErrorPage('We could not process your unsubscribe request. Please try again.');
+      }
+    }
+
+    if (url.pathname === '/finalize-unsubscribe' && request.method === 'GET') {
+      const token = url.searchParams.get('token');
+      if (!token) return unsubscribeInvalidPage();
+      try {
+        const result = await finalizeUnsubscribe(env, token);
+        if (result.status === 'ok' && result.email) {
+          return finalizeSuccessPage(result.email);
+        }
+        return unsubscribeInvalidPage();
+      } catch (err) {
+        console.error(`[Finalize unsubscribe] Error: ${err}`);
+        return genericErrorPage('We could not complete your unsubscribe. Please try again.');
+      }
+    }
+
     return new Response('Not found', { status: 404 });
   },
 };
+
+// ── Subscribe endpoint helpers ─────────────────────────────────────────────
+
+interface SubscribeInput {
+  email: string;
+  lang: string;
+  name?: string;
+  website?: string;
+  isForm: boolean;
+}
+
+async function parseSubscribeBody(request: Request): Promise<SubscribeInput> {
+  const contentType = request.headers.get('Content-Type') ?? '';
+  if (contentType.includes('application/json')) {
+    const body = (await request.json()) as Partial<SubscribeInput>;
+    return {
+      email: String(body.email ?? '').trim(),
+      lang: String(body.lang ?? ''),
+      name: body.name ? String(body.name) : undefined,
+      website: body.website ? String(body.website) : undefined,
+      isForm: false,
+    };
+  }
+  // Treat everything else (including application/x-www-form-urlencoded and
+  // multipart/form-data) as a browser form submission.
+  const form = await request.formData();
+  return {
+    email: String(form.get('email') ?? '').trim(),
+    lang: String(form.get('lang') ?? ''),
+    name: form.get('name') ? String(form.get('name')) : undefined,
+    website: form.get('website') ? String(form.get('website')) : undefined,
+    isForm: true,
+  };
+}
+
+async function parseUnsubscribeBody(request: Request): Promise<string | null> {
+  const contentType = request.headers.get('Content-Type') ?? '';
+  if (contentType.includes('application/json')) {
+    const body = (await request.json()) as { token?: string };
+    return body.token ?? null;
+  }
+  const form = await request.formData();
+  const t = form.get('token');
+  return t ? String(t) : null;
+}
+
+function subscribeCheckInboxResponse(email: string, isForm: boolean): Response {
+  if (isForm) return checkInboxPage(email);
+  return jsonResponse({ status: 'ok', message: 'Check your inbox to confirm.' });
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  });
+}

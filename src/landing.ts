@@ -534,6 +534,35 @@ const PAGE_STYLES = `<style>
   }
   .subscribe-banner-inner button:hover { background: var(--grey-900); color: var(--white); }
 
+  /* ── Language radios (shared by subscribe-box and subscribe-banner) ── */
+  .lang-choice {
+    display: flex;
+    gap: 12px;
+    font-size: 13px;
+    align-items: center;
+    color: rgba(255,255,255,0.9);
+  }
+  .lang-choice label {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    cursor: pointer;
+  }
+  .lang-choice input[type="radio"] {
+    accent-color: var(--white);
+    margin: 0;
+  }
+
+  /* Honeypot — visually hidden, accessible to bots only */
+  .hp-field {
+    position: absolute !important;
+    left: -9999px !important;
+    width: 1px !important;
+    height: 1px !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+
   /* ── Footer ── */
   .footer {
     background: var(--grey-900);
@@ -696,8 +725,13 @@ function subscribeBanner(): string {
         <h2>Get the digest in your inbox</h2>
         <p>38+ international sources, one concise briefing every morning.</p>
       </div>
-      <form onsubmit="return false;">
-        <input type="email" placeholder="your@email.com" aria-label="Email address" required>
+      <form action="/api/subscribe" method="post">
+        <input type="email" name="email" placeholder="your@email.com" aria-label="Email address" required>
+        <div class="lang-choice" role="radiogroup" aria-label="Language">
+          <label><input type="radio" name="lang" value="en" checked> English</label>
+          <label><input type="radio" name="lang" value="pl"> Polski</label>
+        </div>
+        <input type="text" name="website" tabindex="-1" autocomplete="off" class="hp-field" aria-hidden="true">
         <button type="submit">Subscribe Free</button>
       </form>
     </div>
@@ -831,8 +865,13 @@ export function buildLandingPage(data?: DigestData | null): string {
       <div class="subscribe-box">
         <h3>Get the digest in your inbox</h3>
         <p>38+ sources, distilled by AI into one briefing every morning.</p>
-        <form onsubmit="return false;">
-          <input type="email" placeholder="your@email.com" aria-label="Email address" required>
+        <form action="/api/subscribe" method="post">
+          <input type="email" name="email" placeholder="your@email.com" aria-label="Email address" required>
+          <div class="lang-choice" role="radiogroup" aria-label="Language">
+            <label><input type="radio" name="lang" value="en" checked> English</label>
+            <label><input type="radio" name="lang" value="pl"> Polski</label>
+          </div>
+          <input type="text" name="website" tabindex="-1" autocomplete="off" class="hp-field" aria-hidden="true">
           <button type="submit">Subscribe Free</button>
         </form>
         <div class="subscribe-note">One email per day. Unsubscribe anytime.</div>

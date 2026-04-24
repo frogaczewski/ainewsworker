@@ -13,6 +13,20 @@ cpu_ms = 300000  # 5 minutes — Workers Standard max; pipeline needs >30s defau
 # Set to "false" to fall back to the legacy single-call Sonnet triage path.
 USE_BATCHED_CLASSIFICATION = "true"
 
+# A/B variant fan-out. When ENABLE_AB_VARIANTS=true, each enabled config in
+# AB_VARIANT_CONFIGS runs its own classify→compile→send pipeline on the cached
+# RSS items, sending a labelled email to frogaczewski@gmail.com only. Baseline
+# Claude pipeline is unaffected. See src/providers.ts for the variant registry.
+ENABLE_AB_VARIANTS = "false"
+AB_VARIANT_CONFIGS = "gemini"
+
+# Digest illustration. When "true", Phase 2 generates one Economist-style
+# montage via gpt-image-1 and inlines it on the EMAIL_TO (owner) send only —
+# Polish recipients and other KV subscribers are unaffected. Requires the
+# OPENAI_API_KEY secret. Failure is non-fatal: the email still ships without
+# an image. See src/image.ts.
+ENABLE_DIGEST_IMAGE = "false"
+
 [[kv_namespaces]]
 binding = "DIGEST_KV"
 id = "ef7d3c8046664432a3632f8a5777a95a"
@@ -65,7 +79,32 @@ crons = ["0 3 * * *", "30 3 * * *", "0 4 * * *"]
 # CLAUDE_PLATFORM_API  — Anthropic API key
 # MAILJET_API_KEY      — Mailjet public key
 # MAILJET_SECRET_KEY   — Mailjet secret key
+# UNSUB_TOKEN_SECRET   — HMAC key for unsubscribe-link tokens. Deterministic
+#                        tokens are derived from (email, lang) at digest-send
+#                        time, so this secret is required for the subscribe/
+#                        unsubscribe flow to work. Generate with e.g.
+#                        `openssl rand -hex 32` and push with
+#                        `npx wrangler secret put UNSUB_TOKEN_SECRET`.
 #
-# Feature flag (plain env var, not a secret):
-# USE_BATCHED_CLASSIFICATION=true  — enables the new batched Haiku pipeline.
-# Unset or "false" runs the legacy single-call Sonnet triage path.
+# A/B variant secrets (set via `wrangler secret put` once you enable variants):
+# GEMINI_API_KEY       — Google AI Studio key (free tier at ai.google.dev)
+#
+# Image-generation secret (set once you enable ENABLE_DIGEST_IMAGE):
+# OPENAI_API_KEY       — OpenAI key for gpt-image-1. Only read when
+#                        ENABLE_DIGEST_IMAGE=true; safe to leave unset otherwise.
+#
+# Optional env vars (plain, not secrets):
+# PUBLIC_ORIGIN=https://…                 — origin used in transactional email
+#                                            links. Falls back to the hardcoded
+#                                            workers.dev URL when unset. Set in
+#                                            `.dev.vars` for local testing.
+# DRY_EMAIL=true                          — wrangler dev only: log confirmation
+#                                            emails to the console instead of
+#                                            hitting Mailjet. Digest sends are
+#                                            unaffected.
+# USE_BATCHED_CLASSIFICATION=true         — enables the new batched Haiku
+#                                            pipeline. Unset/"false" runs the
+#                                            legacy single-call Sonnet triage.
+# ENABLE_DIGEST_IMAGE=true                — generate an Economist-style
+#                                            illustration for the owner's email
+#                                            only. Requires OPENAI_API_KEY.

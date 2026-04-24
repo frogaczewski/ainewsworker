@@ -6,9 +6,23 @@ export interface Env {
   DIGEST_KV: KVNamespace;
   DIGEST_QUEUE: Queue<QueueMessage>;
 
+  // HMAC key for unsubscribe tokens. Tokens are derived deterministically from
+  // (email, lang) so they're double-click-safe and also work for the hardcoded
+  // recipient lists in config.ts without pre-registration in KV.
+  UNSUB_TOKEN_SECRET: string;
+
   // Feature flag: switch the triage stage from single Sonnet call over 200 items
   // to parallel Haiku classification over all items. Set to 'true' to enable.
   USE_BATCHED_CLASSIFICATION?: string;
+
+  // Local-dev flag: when "true", subscribe/unsubscribe confirmation emails are
+  // logged to the console instead of being sent through Mailjet. Digest sends
+  // are unaffected.
+  DRY_EMAIL?: string;
+
+  // Public origin used in transactional email links. Falls back to the hardcoded
+  // workers.dev URL when unset. Override in `.dev.vars` during local testing.
+  PUBLIC_ORIGIN?: string;
 
   // Optional: external uptime-monitor ping URL (healthchecks.io, Better Uptime,
   // cronitor, etc.). Phase 2 GETs this on successful completion; if no ping
@@ -16,6 +30,44 @@ export interface Env {
   // independent of Cloudflare, so it catches account-level outages our own
   // watchdog can't. Set via `npx wrangler secret put HEARTBEAT_URL`.
   HEARTBEAT_URL?: string;
+
+  // A/B variant plumbing — see src/providers.ts. All optional; when absent
+  // the pipeline behaves exactly as the baseline 'claude' config.
+  GEMINI_API_KEY?: string;
+  ENABLE_AB_VARIANTS?: string;     // "true" to enable variant fan-out
+  AB_VARIANT_CONFIGS?: string;     // comma-separated variant ids, e.g. "gemini"
+
+  // Digest illustration — see src/image.ts. When ENABLE_DIGEST_IMAGE="true",
+  // Phase 2 generates one Economist-style montage via gpt-image-1 and inlines
+  // it on the EMAIL_TO (owner) send only. Polish recipients are unaffected.
+  OPENAI_API_KEY?: string;
+  ENABLE_DIGEST_IMAGE?: string;
+}
+
+export type SubscriberLang = 'en' | 'pl';
+
+export interface SubscriberRecord {
+  email: string;
+  name?: string;
+  lang: SubscriberLang;
+  unsubToken: string;
+  confirmedAt: number;
+  createdAt: number;
+}
+
+export interface PendingSubscriberRecord {
+  email: string;
+  name?: string;
+  lang: SubscriberLang;
+  confirmToken: string;
+  tokenExpiresAt: number;
+  createdAt: number;
+}
+
+export interface TokenPayload {
+  email: string;
+  lang: SubscriberLang;
+  purpose: 'confirm' | 'unsub-confirm';
 }
 
 // Messages flowing through DIGEST_QUEUE between Phase 1 (cron / /run) and
@@ -24,9 +76,16 @@ export interface Env {
 export type QueueMessage =
   | {
       // Standard handoff: Phase 1 wrote phase1:{date} to KV, run Phase 2 now.
+      // If `variant` is set, this runs an A/B variant pipeline (classify →
+      // compile → send) using the given config, to a single recipient only —
+      // it does NOT replace the baseline flow. Baseline messages omit variant.
       kind: 'compile-and-send';
       date: string;
       testMode?: boolean;
+      variant?: {
+        configId: string;
+        recipient: { email: string; name: string };
+      };
     }
   | {
       // Manual retrigger: skip compile, just resend cached emailMarkdown to all.
