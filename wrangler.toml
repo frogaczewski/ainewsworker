@@ -25,7 +25,7 @@ AB_VARIANT_CONFIGS = "gemini,gemini-claude,openai"
 # Polish recipients and other KV subscribers are unaffected. Requires the
 # OPENAI_API_KEY secret. Failure is non-fatal: the email still ships without
 # an image. See src/image.ts.
-ENABLE_DIGEST_IMAGE = "true"
+ENABLE_DIGEST_IMAGE = "false"
 
 [[kv_namespaces]]
 binding = "DIGEST_KV"
