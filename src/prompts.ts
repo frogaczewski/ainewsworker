@@ -592,3 +592,143 @@ ${weatherJson}
 === MARKET DATA ===
 ${marketsJson}`;
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Structured compilation prompt — single Sonnet call producing EN+PL output.
+//
+// Replaces the chain compileDigest → buildEmailBriefing → translateToPolish
+// (3 Sonnet calls per pipeline run) with one structured call. The model emits
+// per-story headline / body / tldr in both English and Polish; markdown for
+// the full digest, the email briefing, and the Polish briefing is then
+// assembled in code (see digest-builder.ts).
+//
+// What's intentionally NOT in this prompt that was in
+// buildSectionedCompilationPrompt:
+//  - The whole "OUTPUT STRUCTURE" markdown skeleton (date header, separators,
+//    weather/markets tables, footer) — code-assembled.
+//  - Section headers and emoji — code-assembled per language.
+// ──────────────────────────────────────────────────────────────────────────────
+export function buildStructuredCompilationPrompt(
+  input: SelectedDigestInput,
+  markets: MarketData,
+  feedStats: { total: number; failed: number },
+): string {
+  const sectionsJson = JSON.stringify(input.sections, null, 2);
+  const gapsJson = JSON.stringify(input.gaps ?? [], null, 2);
+  const marketsJson = JSON.stringify(markets, null, 2);
+
+  void feedStats;
+
+  return `You are writing a daily news digest for Filip in Pegeia, Cyprus (ties to Poland; follows technology, climate, science, global politics, business). Output is consumed by code that assembles English and Polish markdown digests + email briefings — so you produce STRUCTURED JSON, not markdown.
+
+**Stories have ALREADY been selected, sectioned, and deduplicated upstream. Do NOT:**
+- re-select stories (use every story provided)
+- move stories between sections
+- drop stories
+- add stories from elsewhere
+- mention the same event in two different sections
+
+## OUTPUT SHAPE (JSON only — no prose, no markdown fences)
+
+\`\`\`json
+{
+  "sections": [
+    {
+      "key": "<sectionKey from input>",
+      "format": "prose" | "bullets" | "editorial",
+      "stories": [
+        {
+          "link": "<exact link from input — used as join key>",
+          "headline": { "en": "...", "pl": "..." },
+          "body":     { "en": "...", "pl": "..." },
+          "tldr":     { "en": "...", "pl": "..." }
+        }
+      ]
+    }
+  ],
+  "gaps": [
+    { "section": "<sectionKey>", "note": { "en": "...", "pl": "..." } }
+  ],
+  "marketCommentary": { "en": "...", "pl": "..." },
+  "macroWatch":       { "en": "...", "pl": "..." }
+}
+\`\`\`
+
+Mirror input.sections.key and input.sections.format exactly. Mirror input.gaps[].section exactly. Only emit gaps that appear in input.gaps.
+
+## PER-FORMAT LENGTH RULES
+
+**format: "prose"** (politics, country sections, category sections, globalSouth)
+- headline: bold story title, plain text (no markdown bold markers — code adds those)
+- body: 3-6 sentences with key facts, figures, quotes, context. Citations baked in as markdown links — see CITATIONS below.
+- tldr: 1-2 sentence summary capturing the single most important fact, plus the citation link.
+
+**format: "bullets"** (alsoNotable, happenedInWorld, sports, culture)
+- headline: bold prefix only — country ("Kazakhstan"), competition ("Champions League"), type ("Film", "Music", "Polish culture")
+- body: ONE sentence + citation link
+- tldr: identical to body — bullets are already concise; do not shorten further
+
+**format: "editorial"** (editorial picks)
+- headline: bold title of the piece
+- body: 2-3 sentences summarising what the piece argues and why it matters, plus citation link
+- tldr: identical to body — editorial picks are kept at full 2-3 sentences in the briefing too
+
+## CITATIONS
+
+Every body and tldr MUST end with at least one inline markdown link to the source: \`([Source Name](url))\`.
+
+**Multi-source attribution.** When the input story has \`all_sources\` with multiple entries, name 2-3 outlets explicitly in the body:
+- Broad agreement: "...reported by [BBC](url), [Reuters](url), and [France 24](url)"
+- Differing angles (entries have an \`angle\` field): "BBC focused on the humanitarian toll, while Al Jazeera emphasised the diplomatic fallout ([BBC](url), [Al Jazeera](url))"
+- \`conflicting: true\`: explicitly contrast — "Western outlets ([BBC](url), [Reuters](url)) reported X, while TASS ([url]) framed the situation as Y"
+
+The tldr only needs to cite the single primary source.
+
+## LANGUAGE & TRANSLATION RULES
+
+You are producing both English AND Polish in the same response. The Polish field is NOT a downstream translation — write it as a Polish journalist would, directly from the source material:
+
+- Polish prose should read naturally to a native speaker — proper grammar, declensions, idiom; not literal calques from English
+- Quotes can stay in their original language if appropriate; otherwise paraphrase faithfully
+- Source names in markdown links: keep media outlet names in the original ("The Guardian", "France 24", "Al Jazeera") — do NOT translate them
+- Country/category/section labels are translated by code, not by you — focus on prose
+- Polish numerical conventions: comma as decimal separator ("3,6 mln"), space as thousands separator ("500 000"), "mln" / "mld" instead of "million" / "billion" written out (in PL only — keep English form in the .en field)
+- Proper nouns: keep original spelling unless a widely-accepted Polish form exists ("Stany Zjednoczone", "Wielka Brytania", "Cypr")
+- Emoji and markdown formatting: preserved identically across languages
+
+## UNIT NORMALIZATION (apply to BOTH .en and .pl)
+
+The audience is Polish/European. Convert non-metric and South-Asian units before writing:
+
+- **South Asian numbering → international**: "crore" = 10,000,000; "lakh" = 100,000. "3.6 crore voters" → English: "36 million voters", Polish: "36 mln wyborców". Never leave "crore" or "lakh" in either language.
+- **Imperial → metric**: miles→km (×1.609), feet→m (×0.3048), inches→cm (×2.54), pounds→kg (×0.4536), ounces→g (×28.35), gallons→litres (×3.785), °F→°C ((F−32)×5/9). Round sensibly: 1 decimal max for most; no decimal for distances >10 km.
+- **Currency**: leave native currency, add USD or EUR equivalent in parentheses for less-familiar currencies (INR, PKR, PHP, NGN, IDR, BDT, LKR, EGP, KES, ZAR, ARS, BRL, MXN, VND...). Example: "500,000 rupees (~$6,000)". Do NOT convert USD, EUR, GBP, PLN.
+- **English written form**: "36 million", "500,000", "2.5 billion". **Polish written form**: "36 mln", "500 000", "2,5 mld".
+
+## MARKETS / MACRO PROSE
+
+- \`marketCommentary\`: 1-2 sentences explaining what drove markets today, using the market data provided.
+- \`macroWatch\`: 3-5 sentences on the most significant macroeconomic developments — CPI/PPI prints, central bank decisions, GDP/employment/trade data, IMF/World Bank forecasts, tariffs/sanctions. If none today, briefly note what's coming up this week. Always cite sources as markdown links.
+
+Both fields in EN and PL using the same translation rules as above.
+
+## GAPS
+
+If \`input.gaps\` lists a note for a section, emit a corresponding entry under "gaps" with the note translated into both languages. Only emit gaps that appear in input.gaps.
+
+## CRITICAL OUTPUT RULES
+
+- Return ONLY a JSON object matching the shape above. No markdown code fences. No commentary before or after.
+- Every story in input.sections must produce exactly one entry in the output (matched by \`link\`).
+- Section order in output must match input.sections order (already in publication order).
+- Do NOT use markdown blockquote syntax (\`>\`) anywhere — it does not render in email.
+
+=== INPUT SECTIONS (ordered, pre-formatted — process every story) ===
+${sectionsJson}
+
+=== GAPS ===
+${gapsJson}
+
+=== MARKET DATA ===
+${marketsJson}`;
+}

@@ -289,3 +289,50 @@ export interface DigestData {
   emailMarkdown?: string;
   storyImages?: Record<string, string>; // maps article URL → image URL
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Structured digest (EN + PL in one Sonnet call)
+//
+// Every prose chunk comes back in both languages so the pipeline can assemble
+// English and Polish digests + briefings entirely in code, eliminating the
+// downstream `buildEmailBriefingPrompt` and `buildTranslationPrompt` calls.
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface BilingualText {
+  en: string;
+  pl: string;
+}
+
+export interface StructuredStory {
+  // Stable key — matches `link` on the corresponding ClassifiedItem in the
+  // input SelectedDigestSection. Used to look up imageUrl / all_sources / etc.
+  // when assembling the rendered digest.
+  link: string;
+  // Bold story title for prose/editorial; bold prefix (e.g., "Kazakhstan",
+  // "Champions League") for bullets.
+  headline: BilingualText;
+  // Main body. Length depends on the section format:
+  //  - prose: 3-6 sentences with citations baked in
+  //  - bullets: a single sentence with citation
+  //  - editorial: 2-3 sentences summarising the argument
+  body: BilingualText;
+  // Email-briefing form. For prose sections this is ~1 sentence; for bullets
+  // and editorial it is identical to `body` (we don't shorten further).
+  tldr: BilingualText;
+}
+
+export interface StructuredSection {
+  key: SectionKey;
+  format: 'prose' | 'bullets' | 'editorial';
+  stories: StructuredStory[];
+}
+
+export interface StructuredDigest {
+  sections: StructuredSection[];
+  // Italic note shown after a section (e.g., "No major Ukraine developments
+  // in today's feeds."). The LLM emits the note in both languages.
+  gaps: { section: SectionKey; note: BilingualText }[];
+  // Markets/macro prose. Tables are code-assembled from MarketData.
+  marketCommentary: BilingualText;
+  macroWatch: BilingualText;
+}
