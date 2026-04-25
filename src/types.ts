@@ -287,6 +287,13 @@ export interface DigestData {
   feedStats: { total: number; succeeded: number };
   digestMarkdown?: string;
   emailMarkdown?: string;
+  digestMarkdownPl?: string;
+  emailMarkdownPl?: string;
+  // JSON-stringified StructuredDigest. Populated when the structured-output
+  // compilation path was used; absent when the legacy chain ran. Stored so a
+  // Phase 2 retry can re-assemble all four markdown forms without re-paying
+  // the Sonnet call.
+  structuredDigest?: string;
   storyImages?: Record<string, string>; // maps article URL → image URL
 }
 

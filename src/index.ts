@@ -12,7 +12,14 @@ import {
   buildSectionedCompilationPrompt,
   buildEmailBriefingPrompt,
   buildTranslationPrompt,
+  buildStructuredCompilationPrompt,
 } from './prompts';
+import {
+  parseStructuredDigest,
+  assembleAll,
+  type AssembleOptions,
+} from './digest-builder';
+import type { StructuredDigest } from './types';
 import {
   classifyInBatches,
   urlDedupAndDropLow,
@@ -318,6 +325,142 @@ async function buildEmailBriefing(
   return rewriteStoryLinks(briefingRaw, WEBSITE_URL, date);
 }
 
+// Result shape produced by either the structured or the legacy compile path.
+// `structured` is set only when the structured path succeeds — the legacy
+// chain has no JSON to persist. Polish full digest is similarly structured-
+// only (legacy never produced one; only the briefing got translated).
+interface CompiledDigest {
+  fullDigestEn: string;
+  briefingEn: string;
+  briefingPl: string;
+  fullDigestPl?: string;
+  structured?: StructuredDigest;
+}
+
+function assembleOptionsFor(phase1: Phase1Output): AssembleOptions {
+  return {
+    websiteUrl: WEBSITE_URL,
+    date: new Date(),
+    dateString: phase1.date,
+    feedStats: { total: phase1.feedStats.total, failed: phase1.feedStats.failed },
+    weather: phase1.weather,
+    markets: phase1.markets,
+    input: phase1.selectedInput,
+  };
+}
+
+// Single Sonnet call producing EN + PL prose; markdown is assembled in code.
+// Replaces compileDigest → buildEmailBriefing → translateToPolish (3 calls)
+// when the response parses cleanly.
+async function compileStructured(
+  env: Env,
+  config: VariantConfig,
+  phase1: Phase1Output,
+): Promise<CompiledDigest> {
+  const prompt = buildStructuredCompilationPrompt(
+    phase1.selectedInput,
+    phase1.markets,
+    { total: phase1.feedStats.total, failed: phase1.feedStats.failed },
+  );
+  const provider = resolveProvider(config, 'standard');
+  const raw = await provider.call(env, 'standard', prompt, 32000);
+  const structured = parseStructuredDigest(raw);
+  const assembled = assembleAll(structured, assembleOptionsFor(phase1));
+  return { ...assembled, structured };
+}
+
+// Re-assemble all four markdown forms from a previously-persisted structured
+// digest. Lets a Phase 2 retry skip the Sonnet call entirely when the prior
+// run made it past compilation but failed before send.
+function assembleFromCachedStructured(
+  structured: StructuredDigest,
+  phase1: Phase1Output,
+): CompiledDigest {
+  const assembled = assembleAll(structured, assembleOptionsFor(phase1));
+  return { ...assembled, structured };
+}
+
+// Legacy 3-call chain: compile → briefing → translate. Used as a fallback
+// when the structured path fails to parse or the model returns malformed JSON.
+async function compileLegacy(
+  env: Env,
+  config: VariantConfig,
+  phase1: Phase1Output,
+  date: string,
+): Promise<CompiledDigest> {
+  const fullDigestEn = await compileDigest(env, config, phase1);
+  const briefingEn = await buildEmailBriefing(env, config, fullDigestEn, date);
+  const briefingPl = await translateToPolish(env, config, briefingEn);
+  return { fullDigestEn, briefingEn, briefingPl };
+}
+
+// Try the structured path; fall back to the legacy chain on parse failure or
+// any other error. The fallback path still ships a working digest, just at
+// the old 3-call cost.
+async function compileWithFallback(
+  env: Env,
+  config: VariantConfig,
+  phase1: Phase1Output,
+  date: string,
+): Promise<CompiledDigest> {
+  try {
+    const result = await compileStructured(env, config, phase1);
+    console.log(
+      `[Compile] Structured path OK (${config.id}) — ` +
+        `EN ${result.fullDigestEn.length}c / PL ${result.fullDigestPl?.length ?? 0}c, ` +
+        `briefings EN ${result.briefingEn.length}c / PL ${result.briefingPl.length}c`,
+    );
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Compile] Structured path failed (${config.id}), falling back to 3-call chain: ${msg}`);
+    return compileLegacy(env, config, phase1, date);
+  }
+}
+
+// Resumption-aware compile for Phase 2:
+//   1. structuredDigest in KV → re-assemble (no LLM call)
+//   2. digestMarkdown + emailMarkdown in KV → reuse (legacy cache; no PL full
+//      digest, briefingPl re-translated from cached emailMarkdown)
+//   3. Fresh compile via compileWithFallback, then persist whichever forms
+//      are available.
+async function loadOrCompileForPhase2(
+  env: Env,
+  phase1: Phase1Output,
+  date: string,
+): Promise<CompiledDigest> {
+  const cachedStructured = await readCachedDigestField(env, date, 'structuredDigest');
+  if (cachedStructured) {
+    try {
+      const structured = JSON.parse(cachedStructured) as StructuredDigest;
+      const result = assembleFromCachedStructured(structured, phase1);
+      console.log(`[Phase2] Reused cached structured digest (${cachedStructured.length} bytes)`);
+      return result;
+    } catch (err) {
+      console.log(`[Phase2] Cached structuredDigest unparsable (${err}); re-compiling`);
+    }
+  }
+
+  const cachedFullEn = await readCachedDigestField(env, date, 'digestMarkdown');
+  const cachedBriefingEn = await readCachedDigestField(env, date, 'emailMarkdown');
+  if (cachedFullEn && cachedBriefingEn) {
+    console.log(`[Phase2] Reusing cached EN digest+briefing pair; re-translating PL`);
+    const briefingPl = await translateToPolish(env, BASELINE_CONFIG, cachedBriefingEn);
+    return { fullDigestEn: cachedFullEn, briefingEn: cachedBriefingEn, briefingPl };
+  }
+
+  console.log(`[Phase2] Step 5: Compiling structured digest (${BASELINE_CONFIG.id})...`);
+  const compiled = await compileWithFallback(env, BASELINE_CONFIG, phase1, date);
+  await persistDigest(env, phase1, {
+    digestMarkdown: compiled.fullDigestEn,
+    emailMarkdown: compiled.briefingEn,
+    digestMarkdownPl: compiled.fullDigestPl,
+    emailMarkdownPl: compiled.briefingPl,
+    structuredDigest: compiled.structured ? JSON.stringify(compiled.structured) : undefined,
+  });
+  return compiled;
+}
+
 async function runPhase2(env: Env, date: string, opts: Phase2Options = {}): Promise<string> {
   console.log(`[Phase2] Starting compile+send for ${date} (testMode=${!!opts.testMode})`);
 
@@ -327,43 +470,28 @@ async function runPhase2(env: Env, date: string, opts: Phase2Options = {}): Prom
   }
   const phase1: Phase1Output = JSON.parse(raw);
 
-  // ── Step 5a: compile full digest ───────────────────────────────────────────
-  let fullDigest = await readCachedDigestField(env, date, 'digestMarkdown');
-  if (fullDigest) {
-    console.log(`[Phase2] Reusing cached digestMarkdown (${fullDigest.length} chars)`);
-  } else {
-    console.log(`[Phase2] Step 5a: Compiling full digest (${BASELINE_CONFIG.id})...`);
-    fullDigest = await compileDigest(env, BASELINE_CONFIG, phase1);
-    console.log(`[Phase2] Full digest compiled (${fullDigest.length} characters)`);
-
-    // Persist immediately so a Step 5b failure doesn't force us to recompile.
-    await persistDigest(env, phase1, { digestMarkdown: fullDigest });
-  }
-
-  // ── Step 5b: email briefing ────────────────────────────────────────────────
-  let emailBriefing = await readCachedDigestField(env, date, 'emailMarkdown');
-  if (emailBriefing) {
-    console.log(`[Phase2] Reusing cached emailMarkdown (${emailBriefing.length} chars)`);
-  } else {
-    console.log(`[Phase2] Step 5b: Generating email briefing (${BASELINE_CONFIG.id})...`);
-    emailBriefing = await buildEmailBriefing(env, BASELINE_CONFIG, fullDigest, date);
-    console.log(`[Phase2] Email briefing compiled (${emailBriefing.length} characters)`);
-
-    await persistDigest(env, phase1, { digestMarkdown: fullDigest, emailMarkdown: emailBriefing });
-  }
+  // ── Step 5: structured compilation (one Sonnet call, EN+PL out) ────────────
+  // Resumption order: cached structured JSON → cached EN markdown pair →
+  // fresh compile. Only the structured JSON path also gives us PL forms; the
+  // legacy cache only carries EN.
+  const compiled = await loadOrCompileForPhase2(env, phase1, date);
 
   // ── Step 5c: generate illustration (owner-only, gated by ENABLE_DIGEST_IMAGE) ──
   let inlineImage: InlineImage | undefined;
   if (env.ENABLE_DIGEST_IMAGE === 'true') {
-    const img = await generateDigestImage(env, emailBriefing).catch(err => {
+    const img = await generateDigestImage(env, compiled.briefingEn).catch(err => {
       console.log(`[Phase2] Image generation threw (non-fatal): ${err instanceof Error ? err.message : err}`);
       return null;
     });
     if (img) inlineImage = img;
   }
 
-  // ── Step 6 + 7: translate (parallel) and send ──────────────────────────────
-  await sendAllEmails(env, emailBriefing, { ...opts, inlineImage, interestItems: phase1.interestItems });
+  // ── Step 6 + 7: send (no in-flight translation — briefingPl is ready) ──────
+  await sendAllEmails(env, compiled.briefingEn, compiled.briefingPl, {
+    ...opts,
+    inlineImage,
+    interestItems: phase1.interestItems,
+  });
 
   // Heartbeat: only after every recipient resolved. The 03:30 retry uses this
   // to decide whether to re-enqueue.
@@ -500,13 +628,12 @@ async function runVariantCore(
 
   const language = opts.language ?? 'pl';
 
-  const fullDigest = await compileDigest(env, config, phase1Variant);
-  console.log(`[${tag} ${config.id}] Full digest compiled (${fullDigest.length} chars)`);
-  const emailBriefing = await buildEmailBriefing(env, config, fullDigest, date);
-  console.log(`[${tag} ${config.id}] Email briefing compiled (${emailBriefing.length} chars)`);
-  const finalBriefing = language === 'pl'
-    ? await translateToPolish(env, config, emailBriefing)
-    : emailBriefing;
+  const compiled = await compileWithFallback(env, config, phase1Variant, date);
+  console.log(
+    `[${tag} ${config.id}] Compiled — EN ${compiled.fullDigestEn.length}c, ` +
+      `briefings EN ${compiled.briefingEn.length}c / PL ${compiled.briefingPl.length}c`,
+  );
+  const finalBriefing = language === 'pl' ? compiled.briefingPl : compiled.briefingEn;
 
   if (opts.persistKv) {
     try {
@@ -517,8 +644,11 @@ async function runVariantCore(
         markets: input.markets,
         feedStats: { total: input.feedStats.total, succeeded: input.feedStats.succeeded },
         storyImages,
-        digestMarkdown: fullDigest,
-        emailMarkdown: emailBriefing,
+        digestMarkdown: compiled.fullDigestEn,
+        emailMarkdown: compiled.briefingEn,
+        ...(compiled.fullDigestPl ? { digestMarkdownPl: compiled.fullDigestPl } : {}),
+        emailMarkdownPl: compiled.briefingPl,
+        ...(compiled.structured ? { structuredDigest: JSON.stringify(compiled.structured) } : {}),
         producedBy,
       };
       await env.DIGEST_KV.put(`digest:${date}:${config.id}`, JSON.stringify(variantDigest), {
@@ -674,11 +804,20 @@ async function readCachedDigestField<K extends keyof DigestData>(
   }
 }
 
-// Write digest:{date} + digest:latest, optionally with digestMarkdown / emailMarkdown.
+// Write digest:{date} + digest:latest, optionally with the markdown / Polish
+// markdown / structured-digest fields populated.
+interface PersistPartial {
+  digestMarkdown?: string;
+  emailMarkdown?: string;
+  digestMarkdownPl?: string;
+  emailMarkdownPl?: string;
+  structuredDigest?: string;
+}
+
 async function persistDigest(
   env: Env,
   phase1: Phase1Output,
-  partial: { digestMarkdown?: string; emailMarkdown?: string },
+  partial: PersistPartial,
 ): Promise<void> {
   const data: DigestData = {
     date: phase1.date,
@@ -692,6 +831,9 @@ async function persistDigest(
     storyImages: phase1.storyImages,
     ...(partial.digestMarkdown ? { digestMarkdown: partial.digestMarkdown } : {}),
     ...(partial.emailMarkdown ? { emailMarkdown: partial.emailMarkdown } : {}),
+    ...(partial.digestMarkdownPl ? { digestMarkdownPl: partial.digestMarkdownPl } : {}),
+    ...(partial.emailMarkdownPl ? { emailMarkdownPl: partial.emailMarkdownPl } : {}),
+    ...(partial.structuredDigest ? { structuredDigest: partial.structuredDigest } : {}),
   };
 
   const json = JSON.stringify(data);
@@ -725,11 +867,10 @@ interface SendOptions {
   interestItems?: Record<string, CuratedInterestItem[]>;
 }
 
-// Translate to Polish (in parallel with the English send) and dispatch the
-// English digest + every Polish recipient. Used by both the cron path
-// (via runPhase2) and the manual /resend endpoint. The baseline cron path
-// always uses BASELINE_CONFIG; variant pipelines call translateToPolish
-// directly with their own config.
+// Dispatch the English digest + every Polish recipient. Used by both the
+// cron path (via runPhase2) and the manual /resend endpoint. Both briefings
+// are pre-computed by the structured-output compile path; the legacy chain
+// produces them up front too.
 interface DigestRecipient {
   email: string;
   name: string;
@@ -768,7 +909,12 @@ async function resolveDigestRecipients(
   return unioned.filter(r => !suppressed.has(r.email));
 }
 
-async function sendAllEmails(env: Env, emailBriefing: string, opts: SendOptions = {}): Promise<void> {
+async function sendAllEmails(
+  env: Env,
+  emailBriefing: string,
+  polishBriefing: string,
+  opts: SendOptions = {},
+): Promise<void> {
   const today = new Date();
   const plDateStr = today.toLocaleDateString('pl-PL', {
     weekday: 'long',
@@ -800,8 +946,7 @@ async function sendAllEmails(env: Env, emailBriefing: string, opts: SendOptions 
     const unsubLang: SubscriberLang = isPl ? 'pl' : 'en';
     const unsubToken = await deriveUnsubToken(env, normTo, unsubLang);
     if (isPl) {
-      const polish = await translateToPolish(env, BASELINE_CONFIG, emailBriefing);
-      await sendDigestEmail(env, greetedMarkdown(polish, opts.onlyTo.name, true), undefined, opts.onlyTo, plSubject, baselineLabel, unsubToken);
+      await sendDigestEmail(env, greetedMarkdown(polishBriefing, opts.onlyTo.name, true), undefined, opts.onlyTo, plSubject, baselineLabel, unsubToken);
     } else {
       await sendDigestEmail(env, greetedMarkdown(enBriefingFor(opts.onlyTo.email), opts.onlyTo.name, false), undefined, opts.onlyTo, undefined, baselineLabel, unsubToken, imageForOwner(opts.onlyTo.email));
     }
@@ -809,23 +954,16 @@ async function sendAllEmails(env: Env, emailBriefing: string, opts: SendOptions 
     return;
   }
 
-  // Resolve recipients (hardcoded ∪ KV, minus suppressed) in parallel with the
-  // Polish translation so neither blocks the other.
-  const [enRecipients, plRecipients, polishBriefingPromise] = [
+  const [enList, plList] = await Promise.all([
     resolveDigestRecipients(env, 'en'),
     resolveDigestRecipients(env, 'pl'),
-    translateToPolish(env, BASELINE_CONFIG, emailBriefing),
-  ];
-
-  const [enList, plList] = await Promise.all([enRecipients, plRecipients]);
+  ]);
 
   if (opts.testMode) {
     console.log('[Email] Test mode — sending only to Filip');
     const filip: DigestRecipient = { email: normalizeEmail(EMAIL_TO.email), name: EMAIL_TO.name, lang: 'en' };
     const unsubToken = await deriveUnsubToken(env, filip.email, 'en');
     await sendDigestEmail(env, greetedMarkdown(enBriefingFor(filip.email), filip.name, false), undefined, filip, undefined, baselineLabel, unsubToken, imageForOwner(filip.email));
-    // Drain the translation so it doesn't dangle if waitUntil isn't holding it.
-    await polishBriefingPromise.catch(() => undefined);
     return;
   }
 
@@ -853,7 +991,6 @@ async function sendAllEmails(env: Env, emailBriefing: string, opts: SendOptions 
   await Promise.all(enTasks);
   console.log(`[Email] English emails dispatched (${enList.length} recipients)`);
 
-  const polishBriefing = await polishBriefingPromise;
   if (!polishBriefing) {
     console.log('[Email] No Polish briefing — skipping PL recipients');
     return;
@@ -1078,6 +1215,11 @@ async function handleQueue(batch: MessageBatch<QueueMessage>, env: Env): Promise
         if (!cached) throw new Error(`No digest:${body.date} in KV`);
         const data = JSON.parse(cached) as DigestData;
         if (!data.emailMarkdown) throw new Error(`digest:${body.date} has no emailMarkdown`);
+        // Polish: prefer the persisted Polish briefing (structured path) but
+        // translate on demand if the cached digest predates the structured
+        // refactor.
+        const polish = data.emailMarkdownPl
+          ?? await translateToPolish(env, BASELINE_CONFIG, data.emailMarkdown);
         // Resend the original per-person interest picks too (if that day's Phase 1
         // wrote any). Missing phase1 record is fine — resend still works without them.
         let interestItems: Record<string, CuratedInterestItem[]> | undefined;
@@ -1089,7 +1231,7 @@ async function handleQueue(batch: MessageBatch<QueueMessage>, env: Env): Promise
             // ignore — resend continues without interest sections
           }
         }
-        await sendAllEmails(env, data.emailMarkdown, {
+        await sendAllEmails(env, data.emailMarkdown, polish, {
           testMode: body.testMode,
           onlyTo: body.onlyTo,
           interestItems,
@@ -1291,6 +1433,8 @@ export default {
         }
 
         if (sync) {
+          const polish = data.emailMarkdownPl
+            ?? await translateToPolish(env, BASELINE_CONFIG, data.emailMarkdown);
           let interestItems: Record<string, CuratedInterestItem[]> | undefined;
           const phase1Raw = await env.DIGEST_KV.get(`phase1:${date}`);
           if (phase1Raw) {
@@ -1300,7 +1444,7 @@ export default {
               // ignore — sync resend continues without interest sections
             }
           }
-          await sendAllEmails(env, data.emailMarkdown, { testMode, onlyTo, interestItems });
+          await sendAllEmails(env, data.emailMarkdown, polish, { testMode, onlyTo, interestItems });
           return new Response(
             JSON.stringify({ status: 'sent', date, testMode, onlyTo: onlyTo?.email ?? 'all' }),
             { headers: JSON_HEADERS },

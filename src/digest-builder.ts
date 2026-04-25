@@ -22,6 +22,7 @@ import type {
   StructuredStory,
   WeatherData,
 } from './types';
+import { generateSlug } from './landing';
 
 export type Lang = 'en' | 'pl';
 
@@ -236,15 +237,26 @@ function renderStoryEditorial(story: StructuredStory, lang: Lang, useTldr: boole
   return `**${headline}**\n\n${text}`;
 }
 
+// Build the per-section story-page URL the read-more links point to. Always
+// derive the slug from the *English* header — the landing page is English-only
+// and routes are case-sensitive on the slug.
+function sectionStoryUrl(section: StructuredSection, websiteUrl: string, dateString: string): string {
+  const baseUrl = websiteUrl.replace(/\/$/, '');
+  const slug = generateSlug(SECTION_HEADERS[section.key].en);
+  return `${baseUrl}/story/${dateString}/${slug}`;
+}
+
 function renderSection(
   section: StructuredSection,
   lang: Lang,
   mode: 'full' | 'briefing',
   websiteUrl: string,
+  dateString: string,
 ): string {
   if (section.stories.length === 0) return '';
   const useTldr = mode === 'briefing';
   const lines: string[] = [`## ${SECTION_HEADERS[section.key][lang]}`, ''];
+  const storyUrl = sectionStoryUrl(section, websiteUrl, dateString);
 
   if (section.format === 'bullets') {
     // Bullets stay verbatim in both modes — they're already concise.
@@ -256,7 +268,7 @@ function renderSection(
       lines.push(renderStoryEditorial(story, lang, useTldr));
       lines.push('');
       if (mode === 'briefing') {
-        lines.push(`[Read more →](${websiteUrl})`);
+        lines.push(`[Read more →](${storyUrl})`);
         lines.push('');
       }
     }
@@ -267,7 +279,7 @@ function renderSection(
       lines.push('');
     }
     if (mode === 'briefing') {
-      lines.push(READ_FULL_COVERAGE[lang](websiteUrl));
+      lines.push(READ_FULL_COVERAGE[lang](storyUrl));
       lines.push('');
     }
   }
@@ -281,7 +293,10 @@ function renderSection(
 
 export interface AssembleOptions {
   websiteUrl: string;
+  // Display-formatted date object (used for the title line).
   date: Date;
+  // YYYY-MM-DD form (used to build /story/{date}/{slug} URLs).
+  dateString: string;
   feedStats: { total: number; failed: number };
   weather: WeatherData[];
   markets: MarketData;
@@ -313,7 +328,7 @@ export function assembleFullDigest(
   lang: Lang,
   opts: AssembleOptions,
 ): string {
-  const { websiteUrl, date, feedStats, weather, markets } = opts;
+  const { websiteUrl, date, dateString, feedStats, weather, markets } = opts;
   const parts: string[] = [];
 
   parts.push(`# ${TITLES[lang]} — ${formatDate(date, lang)}`);
@@ -323,7 +338,7 @@ export function assembleFullDigest(
   parts.push('---');
 
   for (const section of digest.sections) {
-    const rendered = renderSection(section, lang, 'full', websiteUrl);
+    const rendered = renderSection(section, lang, 'full', websiteUrl, dateString);
     if (!rendered) continue;
     parts.push('');
     parts.push(rendered);
@@ -369,7 +384,7 @@ export function assembleEmailBriefing(
   lang: Lang,
   opts: AssembleOptions,
 ): string {
-  const { websiteUrl, date, feedStats, weather, markets } = opts;
+  const { websiteUrl, date, dateString, feedStats, weather, markets } = opts;
   const parts: string[] = [];
 
   parts.push(READ_FULL_TOP[lang](websiteUrl));
@@ -383,7 +398,7 @@ export function assembleEmailBriefing(
   for (const section of digest.sections) {
     // "Also Notable" is dropped from the briefing per existing rules.
     if (section.key === 'alsoNotable') continue;
-    const rendered = renderSection(section, lang, 'briefing', websiteUrl);
+    const rendered = renderSection(section, lang, 'briefing', websiteUrl, dateString);
     if (!rendered) continue;
     parts.push('');
     parts.push(rendered);
@@ -422,4 +437,24 @@ export function assembleEmailBriefing(
   parts.push(READ_FULL_BOTTOM[lang](websiteUrl));
 
   return parts.join('\n');
+}
+
+// Convenience: assemble all four markdown forms in one call. Used by the
+// pipeline so a successful structured Sonnet response yields everything
+// downstream stages need (landing markdown, EN/PL briefings, Polish full
+// digest for the optional /pl landing).
+export interface AssembledDigest {
+  fullDigestEn: string;
+  fullDigestPl: string;
+  briefingEn: string;
+  briefingPl: string;
+}
+
+export function assembleAll(digest: StructuredDigest, opts: AssembleOptions): AssembledDigest {
+  return {
+    fullDigestEn: assembleFullDigest(digest, 'en', opts),
+    fullDigestPl: assembleFullDigest(digest, 'pl', opts),
+    briefingEn:   assembleEmailBriefing(digest, 'en', opts),
+    briefingPl:   assembleEmailBriefing(digest, 'pl', opts),
+  };
 }
