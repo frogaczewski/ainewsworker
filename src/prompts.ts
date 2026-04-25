@@ -454,7 +454,7 @@ Mirror input.sections.key and input.sections.format exactly. Mirror input.gaps[]
 
 **format: "prose"** (politics, country sections, category sections, globalSouth)
 - headline: bold story title, plain text (no markdown bold markers — code adds those)
-- body: 3-6 sentences with key facts, figures, quotes, context. Citations baked in as markdown links — see CITATIONS below.
+- body: 2-4 sentences with key facts, figures, quotes, context. Citations baked in as markdown links — see CITATIONS below.
 - tldr: 1-2 sentence summary capturing the single most important fact, plus the citation link.
 
 **format: "bullets"** (alsoNotable, happenedInWorld, sports, culture)
