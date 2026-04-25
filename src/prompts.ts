@@ -334,7 +334,11 @@ For EACH item, return a JSON object:
 
 ## TAGGING RULES
 
-- **country_tags**: ISO 3166-1 alpha-2 codes (PL, CY, NP, UA, IL, US, ...). Include EVERY country the story directly concerns. For Middle East conflict, tag at least IL/IR/LB as appropriate. For Ukraine-Russia war, tag UA AND RU.
+- **country_tags**: ISO 3166-1 alpha-2 codes (PL, CY, NP, UA, IL, US, ...). Tag a country ONLY when the story is substantively ABOUT that country — its government, citizens, territory, economy, or domestic events. Do NOT tag a country merely because:
+  - the story was reported by an outlet based there ("Cyprus Mail covered a Trump-administration story" → tag US, not CY)
+  - an event happened to be hosted there but the subject is broader ("EU summit in Limassol on Ukraine NATO membership" → tag the actual subjects: UA, EU-relevant countries; do NOT tag CY)
+  - a politician from that country commented on someone else's story ("Italian PM remarks on EU budget" tagged at the Cyprus summit → tag IT and the budget's actual subjects, not CY)
+  Tag every country whose government, citizens, territory, or economy is the actual subject. For Middle East conflict, tag IL/IR/LB as appropriate. For Ukraine-Russia war, tag UA AND RU.
 - **category_tags**: a story can have multiple (e.g. a Ukraine strike: ["politics"]; an EU climate regulation: ["politics","climate"]; a Polish culture festival: ["culture"]). If the source is in Bellingcat/The Conversation/Intercept/Global Voices/Carbon Brief/ICIJ/OCCRP/Mongabay/The Markup, add "editorial".
 - **editorial**: true if the source is marked [EDITORIAL] in the input.
 - **Sports**: always tag category "sports". Tag country_tags with the league's country (NBA → US; Ekstraklasa → PL; Premier League → UK).

@@ -328,8 +328,24 @@ const CENTRAL_ASIA = new Set(['KZ', 'UZ', 'KG', 'TJ', 'TM', 'AF', 'MN']);
 const SE_ASIA = new Set(['ID', 'VN', 'PH', 'TH', 'MY', 'SG', 'MM', 'KH', 'LA', 'BD', 'PK', 'LK']);
 
 const ISRAEL_CAP = 2;
+const UKRAINE_CAP = 4;
 const NBA_CAP = 2;
 const US_DOMESTIC_CAP = 3;
+
+// Country codes that indicate a story is primarily *about* a major power, not
+// the priority country it co-tags. Used to keep PL/CY/NP buckets domestic —
+// e.g., "Trump migrant terminations" with country_tags ['US','CY'] should land
+// in politics or alsoNotable, not in the Cyprus section.
+const MAJOR_CO_TAG_COUNTRIES = new Set([
+  'US', 'CN', 'RU', 'UK', 'GB', 'FR', 'DE', 'IT', 'JP', 'IN', 'BR', 'IR', 'IL',
+]);
+
+function hasMajorCoTag(countries: Set<string>): boolean {
+  for (const c of countries) {
+    if (MAJOR_CO_TAG_COUNTRIES.has(c)) return true;
+  }
+  return false;
+}
 
 const SECTION_ORDER: SectionKey[] = [
   'politics', 'poland', 'cyprus', 'nepal', 'europe', 'brics', 'usa',
@@ -384,10 +400,14 @@ function primarySection(item: ClassifiedItem): SectionKey {
   if (hasConflict && cats.has('politics')) return 'politics';
   if (countries.has('UA')) return 'politics';
 
-  // Priority countries (non-conflict)
-  if (countries.has('PL')) return 'poland';
-  if (countries.has('CY')) return 'cyprus';
-  if (countries.has('NP')) return 'nepal';
+  // Priority countries (non-conflict). A story only lands in the country
+  // bucket when the country is the actual subject — not when a major power
+  // is also tagged (US/CN/RU/UK/FR/DE/IT/EU summits hosted in Limassol,
+  // Trump-administration stories merely covered by Cyprus Mail, etc.). Such
+  // stories fall through to politics / category sections / alsoNotable.
+  if (countries.has('PL') && !hasMajorCoTag(countries)) return 'poland';
+  if (countries.has('CY') && !hasMajorCoTag(countries)) return 'cyprus';
+  if (countries.has('NP') && !hasMajorCoTag(countries)) return 'nepal';
 
   // USA
   if (countries.has('US')) {
@@ -428,6 +448,10 @@ function sortByImportance(a: ClassifiedItem, b: ClassifiedItem): number {
 
 function isIsraelConflict(item: ClassifiedItem): boolean {
   return (item.country_tags || []).some(c => MIDDLE_EAST.has(c));
+}
+
+function isUkraineWar(item: ClassifiedItem): boolean {
+  return (item.country_tags || []).includes('UA');
 }
 
 function isNbaOrUsSport(item: ClassifiedItem): boolean {
@@ -477,6 +501,25 @@ export function selectForDigest(classified: ClassifiedItem[]): SelectedDigestInp
       buckets.politics = buckets.politics.filter(it => {
         if (isIsraelConflict(it) && !keep.has(it)) {
           dropped.push({ reason: 'israel-cap', link: it.link, headline: it.headline });
+          return false;
+        }
+        return true;
+      });
+    }
+  }
+
+  // 2b. Ukraine cap within politics. Ukrainian feeds (Ukrinform, Kyiv Independent,
+  //     etc.) typically produce 10+ distinct events per day — front-line strikes,
+  //     prisoner exchanges, weather impact, propaganda, Belarus posture, ...
+  //     all genuinely separate items that semantic dedup correctly leaves intact.
+  //     Without a cap they flood the politics bucket and crowd out everything else.
+  {
+    const ukraine = buckets.politics.filter(isUkraineWar);
+    if (ukraine.length > UKRAINE_CAP) {
+      const keep = new Set(ukraine.slice(0, UKRAINE_CAP));
+      buckets.politics = buckets.politics.filter(it => {
+        if (isUkraineWar(it) && !keep.has(it)) {
+          dropped.push({ reason: 'ukraine-cap', link: it.link, headline: it.headline });
           return false;
         }
         return true;

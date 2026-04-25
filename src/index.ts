@@ -85,12 +85,6 @@ function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function greetedMarkdown(markdown: string, recipientName: string, polish: boolean): string {
-  const firstName = recipientName.split(' ')[0];
-  const greeting = polish ? `Dzień dobry, ${firstName}!` : `Good morning, ${firstName}!`;
-  return `${greeting}\n\n${markdown}`;
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Phase 1: data collection (RSS → classify → dedup → select).
 // Writes phase1:{date} and selected:{date} to KV. Cheap to re-run.
@@ -578,9 +572,8 @@ async function runVariantCore(
     : `${opts.subjectPrefix ?? ''}Daily News Digest — ${now.toLocaleDateString('en-GB', {
         weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
       })}`;
-  // Don't wrap with greetedMarkdown — sendDigestEmail's HTML template already
-  // injects a "☕ Good morning / Dzień dobry" greeting based on the subject.
-  // Wrapping here would produce two greetings in the email body.
+  // sendDigestEmail's HTML template handles the greeting line (☕ Good morning
+  // / Dzień dobry) — pass the briefing as-is.
   await sendDigestEmail(
     env,
     finalBriefing,
@@ -857,9 +850,9 @@ async function sendAllEmails(
     const unsubLang: SubscriberLang = isPl ? 'pl' : 'en';
     const unsubToken = await deriveUnsubToken(env, normTo, unsubLang);
     if (isPl) {
-      await sendDigestEmail(env, greetedMarkdown(polishBriefing, opts.onlyTo.name, true), undefined, opts.onlyTo, plSubject, baselineLabel, unsubToken);
+      await sendDigestEmail(env, polishBriefing, undefined, opts.onlyTo, plSubject, baselineLabel, unsubToken);
     } else {
-      await sendDigestEmail(env, greetedMarkdown(enBriefingFor(opts.onlyTo.email), opts.onlyTo.name, false), undefined, opts.onlyTo, undefined, baselineLabel, unsubToken, imageForOwner(opts.onlyTo.email));
+      await sendDigestEmail(env, enBriefingFor(opts.onlyTo.email), undefined, opts.onlyTo, undefined, baselineLabel, unsubToken, imageForOwner(opts.onlyTo.email));
     }
     console.log(`[Email] Sent to single recipient ${opts.onlyTo.email}`);
     return;
@@ -874,7 +867,7 @@ async function sendAllEmails(
     console.log('[Email] Test mode — sending only to Filip');
     const filip: DigestRecipient = { email: normalizeEmail(EMAIL_TO.email), name: EMAIL_TO.name, lang: 'en' };
     const unsubToken = await deriveUnsubToken(env, filip.email, 'en');
-    await sendDigestEmail(env, greetedMarkdown(enBriefingFor(filip.email), filip.name, false), undefined, filip, undefined, baselineLabel, unsubToken, imageForOwner(filip.email));
+    await sendDigestEmail(env, enBriefingFor(filip.email), undefined, filip, undefined, baselineLabel, unsubToken, imageForOwner(filip.email));
     return;
   }
 
@@ -884,7 +877,7 @@ async function sendAllEmails(
     const image = imageForOwner(recipient.email);
     const send = () => sendDigestEmail(
       env,
-      greetedMarkdown(enBriefingFor(recipient.email), recipient.name, false),
+      enBriefingFor(recipient.email),
       undefined,
       { email: recipient.email, name: recipient.name },
       undefined,
@@ -912,7 +905,7 @@ async function sendAllEmails(
     const unsubToken = await deriveUnsubToken(env, recipient.email, 'pl');
     const send = () => sendDigestEmail(
       env,
-      greetedMarkdown(polishBriefing, recipient.name, true),
+      polishBriefing,
       undefined,
       { email: recipient.email, name: recipient.name },
       plSubject,

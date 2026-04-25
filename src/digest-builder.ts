@@ -117,11 +117,6 @@ const COMPILED_FROM: Record<Lang, (sourcesNote: string) => string> = {
   pl: (s) => `*Opracowano na podstawie: ${s}. Wszystkie wiadomości z ostatnich 24 godzin. Porównane między źródłami.*`,
 };
 
-const READ_FULL_TOP: Record<Lang, (url: string) => string> = {
-  en: (url) => `*[Read the full digest online →](${url})*`,
-  pl: (url) => `*[Czytaj pełny przegląd online →](${url})*`,
-};
-
 const READ_FULL_BOTTOM: Record<Lang, (url: string) => string> = {
   en: (url) => `**[See all stories on the website →](${url})**`,
   pl: (url) => `**[Zobacz wszystkie wiadomości na stronie →](${url})**`,
@@ -387,8 +382,6 @@ export function assembleEmailBriefing(
   const { websiteUrl, date, dateString, feedStats, weather, markets } = opts;
   const parts: string[] = [];
 
-  parts.push(READ_FULL_TOP[lang](websiteUrl));
-  parts.push('');
   parts.push(`# ${TITLES[lang]} — ${formatDate(date, lang)}`);
   parts.push('');
   parts.push(COMPILED_FROM[lang](sourcesNote(feedStats)));
