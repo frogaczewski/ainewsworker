@@ -376,7 +376,7 @@ const SECTION_META: Record<SectionKey, { header: string; format: 'prose' | 'bull
 };
 
 const SECTION_LIMITS: Partial<Record<SectionKey, number>> = {
-  politics: 12, poland: 4, cyprus: 3, nepal: 3, europe: 5, brics: 5, usa: 3,
+  politics: 7, poland: 4, cyprus: 3, nepal: 3, europe: 5, brics: 5, usa: 3,
   tech: 5, climate: 5, science: 4, business: 5, health: 4,
   globalSouth: 5, alsoNotable: 8, happenedInWorld: 10,
   editorial: 3, sports: 10, culture: 7,
