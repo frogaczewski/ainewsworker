@@ -9,8 +9,6 @@ import {
   type VariantConfig,
 } from './providers';
 import {
-  buildSectionedCompilationPrompt,
-  buildEmailBriefingPrompt,
   buildTranslationPrompt,
   buildStructuredCompilationPrompt,
 } from './prompts';
@@ -31,7 +29,7 @@ import { sendDigestEmail, sendErrorEmail, type InlineImage } from './email';
 import { generateDigestImage } from './image';
 import { EMAIL_TO, EMAIL_TO_PL } from './config';
 import { fetchPerPersonInterests, renderInterestsFor } from './interests';
-import { buildLandingPage, buildStoryPage, generateSlug } from './landing';
+import { buildLandingPage, buildStoryPage } from './landing';
 import {
   confirmSubscriber,
   createUnsubConfirmToken,
@@ -91,33 +89,6 @@ function greetedMarkdown(markdown: string, recipientName: string, polish: boolea
   const firstName = recipientName.split(' ')[0];
   const greeting = polish ? `Dzień dobry, ${firstName}!` : `Good morning, ${firstName}!`;
   return `${greeting}\n\n${markdown}`;
-}
-
-/**
- * Replace generic website links in the email briefing with proper /story/{date}/{slug} links.
- * Finds each "Read ... →" link pointing to the base websiteUrl, looks at the nearest
- * preceding h2/h3 header, generates a slug from it, and rewrites the link.
- */
-function rewriteStoryLinks(markdown: string, websiteUrl: string, date: string): string {
-  const lines = markdown.split('\n');
-  let lastHeaderSlug = '';
-  const baseUrl = websiteUrl.replace(/\/$/, '');
-
-  for (let i = 0; i < lines.length; i++) {
-    const headerMatch = lines[i].match(/^#{2,3}\s+(.+)/);
-    if (headerMatch) {
-      lastHeaderSlug = generateSlug(headerMatch[1]);
-    }
-
-    if (lastHeaderSlug && (lines[i].includes(`](${websiteUrl})`) || lines[i].includes(`](${baseUrl})`))) {
-      const storyUrl = `${baseUrl}/story/${date}/${lastHeaderSlug}`;
-      lines[i] = lines[i]
-        .replace(`](${websiteUrl})`, `](${storyUrl})`)
-        .replace(`](${baseUrl})`, `](${storyUrl})`);
-    }
-  }
-
-  return lines.join('\n');
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -298,37 +269,11 @@ interface Phase2Options {
   testMode?: boolean;
 }
 
-// Compile the full markdown digest using the standard-tier provider for the
-// given config. Pure wrapper over the Sonnet-or-equivalent call — no KV IO.
-async function compileDigest(env: Env, config: VariantConfig, phase1: Phase1Output): Promise<string> {
-  const prompt = buildSectionedCompilationPrompt(
-    phase1.selectedInput,
-    phase1.weather,
-    phase1.markets,
-    { total: phase1.feedStats.total, failed: phase1.feedStats.failed },
-  );
-  const provider = resolveProvider(config, 'standard');
-  return provider.call(env, 'standard', prompt, 16000);
-}
-
-// Build the email-length briefing from the full digest, then rewrite generic
-// website links to per-story /story/{date}/{slug} URLs.
-async function buildEmailBriefing(
-  env: Env,
-  config: VariantConfig,
-  fullDigest: string,
-  date: string,
-): Promise<string> {
-  const prompt = buildEmailBriefingPrompt(fullDigest, WEBSITE_URL);
-  const provider = resolveProvider(config, 'standard');
-  const briefingRaw = await provider.call(env, 'standard', prompt, 16000);
-  return rewriteStoryLinks(briefingRaw, WEBSITE_URL, date);
-}
-
-// Result shape produced by either the structured or the legacy compile path.
-// `structured` is set only when the structured path succeeds — the legacy
-// chain has no JSON to persist. Polish full digest is similarly structured-
-// only (legacy never produced one; only the briefing got translated).
+// Compiled digest in EN + PL — produced from a single Sonnet call against
+// buildStructuredCompilationPrompt and assembled to markdown in code.
+// fullDigestPl and structured are optional only because the legacy KV
+// resumption path (cached EN markdown from before the structured refactor)
+// lacks them — fresh compileStructured calls always produce all five.
 interface CompiledDigest {
   fullDigestEn: string;
   briefingEn: string;
@@ -350,8 +295,7 @@ function assembleOptionsFor(phase1: Phase1Output): AssembleOptions {
 }
 
 // Single Sonnet call producing EN + PL prose; markdown is assembled in code.
-// Replaces compileDigest → buildEmailBriefing → translateToPolish (3 calls)
-// when the response parses cleanly.
+// On parse failure or any thrown error the call propagates — no fallback.
 async function compileStructured(
   env: Env,
   config: VariantConfig,
@@ -366,6 +310,11 @@ async function compileStructured(
   const raw = await provider.call(env, 'standard', prompt, 32000);
   const structured = parseStructuredDigest(raw);
   const assembled = assembleAll(structured, assembleOptionsFor(phase1));
+  console.log(
+    `[Compile] Structured (${config.id}) OK — ` +
+      `EN ${assembled.fullDigestEn.length}c / PL ${assembled.fullDigestPl.length}c, ` +
+      `briefings EN ${assembled.briefingEn.length}c / PL ${assembled.briefingPl.length}c`,
+  );
   return { ...assembled, structured };
 }
 
@@ -380,50 +329,12 @@ function assembleFromCachedStructured(
   return { ...assembled, structured };
 }
 
-// Legacy 3-call chain: compile → briefing → translate. Used as a fallback
-// when the structured path fails to parse or the model returns malformed JSON.
-async function compileLegacy(
-  env: Env,
-  config: VariantConfig,
-  phase1: Phase1Output,
-  date: string,
-): Promise<CompiledDigest> {
-  const fullDigestEn = await compileDigest(env, config, phase1);
-  const briefingEn = await buildEmailBriefing(env, config, fullDigestEn, date);
-  const briefingPl = await translateToPolish(env, config, briefingEn);
-  return { fullDigestEn, briefingEn, briefingPl };
-}
-
-// Try the structured path; fall back to the legacy chain on parse failure or
-// any other error. The fallback path still ships a working digest, just at
-// the old 3-call cost.
-async function compileWithFallback(
-  env: Env,
-  config: VariantConfig,
-  phase1: Phase1Output,
-  date: string,
-): Promise<CompiledDigest> {
-  try {
-    const result = await compileStructured(env, config, phase1);
-    console.log(
-      `[Compile] Structured path OK (${config.id}) — ` +
-        `EN ${result.fullDigestEn.length}c / PL ${result.fullDigestPl?.length ?? 0}c, ` +
-        `briefings EN ${result.briefingEn.length}c / PL ${result.briefingPl.length}c`,
-    );
-    return result;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[Compile] Structured path failed (${config.id}), falling back to 3-call chain: ${msg}`);
-    return compileLegacy(env, config, phase1, date);
-  }
-}
-
 // Resumption-aware compile for Phase 2:
 //   1. structuredDigest in KV → re-assemble (no LLM call)
-//   2. digestMarkdown + emailMarkdown in KV → reuse (legacy cache; no PL full
-//      digest, briefingPl re-translated from cached emailMarkdown)
-//   3. Fresh compile via compileWithFallback, then persist whichever forms
-//      are available.
+//   2. digestMarkdown + emailMarkdown in KV (cached digests written before
+//      the structured-output refactor) → reuse + on-demand PL translation
+//   3. Fresh compileStructured call. No fallback chain — if Sonnet returns
+//      unparsable JSON, Phase 2 throws and the queue retries.
 async function loadOrCompileForPhase2(
   env: Env,
   phase1: Phase1Output,
@@ -450,7 +361,7 @@ async function loadOrCompileForPhase2(
   }
 
   console.log(`[Phase2] Step 5: Compiling structured digest (${BASELINE_CONFIG.id})...`);
-  const compiled = await compileWithFallback(env, BASELINE_CONFIG, phase1, date);
+  const compiled = await compileStructured(env, BASELINE_CONFIG, phase1);
   await persistDigest(env, phase1, {
     digestMarkdown: compiled.fullDigestEn,
     emailMarkdown: compiled.briefingEn,
@@ -628,7 +539,7 @@ async function runVariantCore(
 
   const language = opts.language ?? 'pl';
 
-  const compiled = await compileWithFallback(env, config, phase1Variant, date);
+  const compiled = await compileStructured(env, config, phase1Variant);
   console.log(
     `[${tag} ${config.id}] Compiled — EN ${compiled.fullDigestEn.length}c, ` +
       `briefings EN ${compiled.briefingEn.length}c / PL ${compiled.briefingPl.length}c`,
