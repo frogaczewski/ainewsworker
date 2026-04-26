@@ -31,17 +31,22 @@ export interface ParsedEvent {
   outputTokens?: number;
 }
 
-const MAX_RETRIES = 2;
+const MAX_RETRIES = 1;
 const RETRY_BASE_MS = 2000;
 const RETRIABLE_STATUS_CODES = new Set([403, 408, 429, 500, 502, 503, 504, 529]);
 
-// Cloudflare's scheduled event has a 15-minute wall-time ceiling. Without these
-// guard rails a stalled fetch or silently hung stream can burn the entire
-// budget and the digest never ships (see exceededCpu / wallTimeMs=899985
-// incident on 2026-04-17). Polish translation legitimately needs >180s on
-// Sonnet (~25K-char output). The chunk-idle timeout still catches truly
-// stuck streams quickly, so this only matters for slow-but-progressing ones.
-const ATTEMPT_TIMEOUT_MS = 300_000;
+// Cloudflare's scheduled event / queue consumer has a 15-minute wall-time
+// ceiling. Without these guard rails a stalled fetch or silently hung stream
+// can burn the entire budget and the digest never ships (see exceededCpu /
+// wallTimeMs=899985 incidents on 2026-04-17 and 2026-04-26). The chunk-idle
+// timeout catches truly stuck streams quickly; the attempt timeout caps the
+// "slow-but-progressing" Sonnet structured-compile call (EN+PL output for
+// ~75 stories streams ~5–7 minutes at typical 60–80 tps).
+//
+// 600s × (1 + MAX_RETRIES=1) = 1200s worst case in-process — still inside the
+// 15-min queue wall, with backoff. If both attempts time out the queue retries
+// the whole message on a fresh worker.
+const ATTEMPT_TIMEOUT_MS = 600_000;
 const CHUNK_IDLE_TIMEOUT_MS = 45_000;
 
 function sleep(ms: number): Promise<void> {

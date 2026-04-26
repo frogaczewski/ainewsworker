@@ -296,7 +296,7 @@ For EACH item, return a JSON object:
 {
   "link": "carried through exactly",
   "headline": "carried through (translate to English if Polish/Nepali/etc.)",
-  "summary": "carried through (translate to English if needed, keep under 400 chars)",
+  "summary": "carried through (translate to English if needed, keep under 250 chars)",
   "source": "carried through",
   "pubDate": "carried through",
   "importance": "high" | "medium" | "low",
@@ -345,7 +345,7 @@ For EACH item, return a JSON object:
 
 ## LANGUAGE
 
-Any Polish, Nepali, or other non-English headline/summary: translate to English in the output. Keep summaries under 400 characters.
+Any Polish, Nepali, or other non-English headline/summary: translate to English in the output. Keep summaries under 250 characters.
 
 ## OUTPUT
 

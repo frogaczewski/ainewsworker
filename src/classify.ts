@@ -88,7 +88,7 @@ async function classifyOneBatch(
   }
 
   const prompt = buildClassificationPrompt(batch);
-  const response = await provider.call(env, 'cheap', prompt, 8000);
+  const response = await provider.call(env, 'cheap', prompt, 12000);
   const parsed = parseClassifiedJson(response);
 
   // Carry imageUrl from RSS item to classified item (prompt doesn't ask for it)
