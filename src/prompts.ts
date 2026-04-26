@@ -517,6 +517,18 @@ If \`input.gaps\` lists a note for a section, emit a corresponding entry under "
 - Section order in output must match input.sections order (already in publication order).
 - Do NOT use markdown blockquote syntax (\`>\`) anywhere — it does not render in email.
 
+## STRICT JSON RULES — your output is parsed with JSON.parse()
+
+Any of the following will fail parsing and break the digest. Be especially careful in long outputs where it's easy to drift:
+
+- **No trailing commas** before \`}\` or \`]\`. The last property of an object and the last element of an array do NOT get a comma.
+- **All property names AND string values must use straight double quotes** (\`"\`). Never use single quotes (\`'\`) or curly/smart quotes (\`"\` \`"\` \`„\` \`«\` \`»\`) as JSON delimiters. Smart quotes inside string values are fine.
+- **Escape internal straight double quotes** inside string values as \`\\"\`. Example: \`"body": { "en": "He said \\"this\\" matters." }\`.
+- **No JavaScript-style comments** (\`//...\` or \`/* ... */\`).
+- **No \`undefined\`, \`NaN\`, \`Infinity\`** values. If a field has no value, use \`null\` or omit it.
+- **Apostrophes (\`'\`), em-dashes (\`—\`), accented characters (\`ą\`, \`ł\`, \`ś\`, \`ć\`, etc.) and emoji need NO escaping** inside string values — emit them as literal UTF-8.
+- **Newlines inside string values must be \`\\n\`**, not literal line breaks. Prefer single-paragraph prose without internal newlines.
+
 === INPUT SECTIONS (ordered, pre-formatted — process every story) ===
 ${sectionsJson}
 

@@ -147,7 +147,30 @@ export function parseStructuredDigest(response: string): StructuredDigest {
   }
   jsonStr = jsonStr.slice(objStart, objEnd + 1);
 
-  const parsed = JSON.parse(jsonStr) as Partial<StructuredDigest>;
+  // Repair the most common LLM JSON drift (trailing commas) before parsing.
+  // Sonnet 4.6 occasionally emits `... },\n}` or `... ],\n]` even when the
+  // prompt forbids it, especially deep into long structured outputs.
+  jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+
+  let parsed: Partial<StructuredDigest>;
+  try {
+    parsed = JSON.parse(jsonStr) as Partial<StructuredDigest>;
+  } catch (err) {
+    // V8 reports `position N` in the parse error. Pull a window around that
+    // byte range so we can iterate the prompt against the actual failure mode.
+    const msg = err instanceof Error ? err.message : String(err);
+    const posMatch = msg.match(/position (\d+)/);
+    if (posMatch) {
+      const pos = Number(posMatch[1]);
+      const start = Math.max(0, pos - 80);
+      const end = Math.min(jsonStr.length, pos + 80);
+      const before = jsonStr.slice(start, pos);
+      const after = jsonStr.slice(pos, end);
+      console.error(`[Parse] Structured digest JSON parse failed at byte ${pos}: ${msg}`);
+      console.error(`[Parse] Context: ...${before}⟪HERE⟫${after}...`);
+    }
+    throw err;
+  }
   if (!Array.isArray(parsed.sections)) {
     throw new Error('Structured digest missing sections array');
   }
