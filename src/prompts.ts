@@ -422,33 +422,9 @@ export function buildStructuredCompilationPrompt(
 - add stories from elsewhere
 - mention the same event in two different sections
 
-## OUTPUT SHAPE (JSON only — no prose, no markdown fences)
+## OUTPUT
 
-\`\`\`json
-{
-  "sections": [
-    {
-      "key": "<sectionKey from input>",
-      "format": "prose" | "bullets" | "editorial",
-      "stories": [
-        {
-          "link": "<exact link from input — used as join key>",
-          "headline": { "en": "...", "pl": "..." },
-          "body":     { "en": "...", "pl": "..." },
-          "tldr":     { "en": "...", "pl": "..." }
-        }
-      ]
-    }
-  ],
-  "gaps": [
-    { "section": "<sectionKey>", "note": { "en": "...", "pl": "..." } }
-  ],
-  "marketCommentary": { "en": "...", "pl": "..." },
-  "macroWatch":       { "en": "...", "pl": "..." }
-}
-\`\`\`
-
-Mirror input.sections.key and input.sections.format exactly. Mirror input.gaps[].section exactly. Only emit gaps that appear in input.gaps.
+You will be invoked as the \`emit_structured_output\` tool. The shape of its \`input\` is fixed by a JSON schema (sections, gaps, marketCommentary, macroWatch — each story has \`link\`, \`headline\`, \`body\`, \`tldr\` with \`en\` and \`pl\` fields). Mirror \`input.sections[].key\` and \`input.sections[].format\` from the data block below; only emit gaps that appear in \`input.gaps\`.
 
 ## PER-FORMAT LENGTH RULES
 
@@ -510,28 +486,13 @@ Both fields in EN and PL using the same translation rules as above.
 
 If \`input.gaps\` lists a note for a section, emit a corresponding entry under "gaps" with the note translated into both languages. Only emit gaps that appear in input.gaps.
 
-## CRITICAL OUTPUT RULES
+## CONTENT RULES
 
-- Return ONLY a JSON object matching the shape above. No markdown code fences. No commentary before or after.
-- Every story in input.sections must produce exactly one entry in the output (matched by \`link\`).
-- Section order in output must match input.sections order (already in publication order).
-- Do NOT use markdown blockquote syntax (\`>\`) anywhere — it does not render in email.
-
-## STRICT JSON RULES — your output is parsed with JSON.parse()
-
-Any of the following will fail parsing and break the digest. Be especially careful in long outputs where it's easy to drift:
-
-- **No trailing commas** before \`}\` or \`]\`. The last property of an object and the last element of an array do NOT get a comma.
-- **All property names AND string values must use straight double quotes** (\`"\`) as JSON delimiters. Never use single quotes (\`'\`) as delimiters. Smart/curly quotes inside string values are fine — see the next rule.
-- **Escape internal straight double quotes** inside string values as \`\\"\`. Example: \`"body": { "en": "He said \\"this\\" matters." }\`.
-- **POLISH QUOTATIONS — most common failure mode**. When you quote a word or short phrase inside a Polish string value, use the matched curly pair: opening \`„\` (U+201E) AND closing \`”\` (U+201D, RIGHT DOUBLE QUOTATION MARK). NEVER pair \`„\` with a straight \`"\` — the straight \`"\` terminates the JSON string. Example:
-  - WRONG: \`"pl": "Trump nazwał to „wstrzymaną", co oznacza..."\`  ← straight \`"\` closes the JSON string mid-sentence
-  - RIGHT: \`"pl": "Trump nazwał to „wstrzymaną”, co oznacza..."\`  ← closing curly \`”\` keeps the string intact
-- **English inline quotations** inside string values: prefer the curly pair \`"..."\` (U+201C and U+201D), or escape both as \`\\"...\\"\`. Never use a stray straight \`"\` inside the string.
-- **No JavaScript-style comments** (\`//...\` or \`/* ... */\`).
-- **No \`undefined\`, \`NaN\`, \`Infinity\`** values. If a field has no value, use \`null\` or omit it.
-- **Apostrophes (\`'\`), em-dashes (\`—\`), accented characters (\`ą\`, \`ł\`, \`ś\`, \`ć\`, etc.) and emoji need NO escaping** inside string values — emit them as literal UTF-8.
-- **Newlines inside string values must be \`\\n\`**, not literal line breaks. Prefer single-paragraph prose without internal newlines.
+- Every story in \`input.sections\` must produce exactly one entry in the output (matched by \`link\`).
+- Section order in output must match \`input.sections\` order (already in publication order).
+- Do NOT use markdown blockquote syntax (\`>\`) anywhere inside any field — it does not render in email.
+- Apostrophes, em-dashes, accented characters (\`ą\`, \`ł\`, \`ś\`, \`ć\`, etc.) and emoji should appear as literal UTF-8 in your output.
+- Polish inline quotations: use the curly pair \`„\` (opening) and \`”\` (closing). English inline quotations: use the curly pair \`"\` and \`"\`.
 
 === INPUT SECTIONS (ordered, pre-formatted — process every story) ===
 ${sectionsJson}

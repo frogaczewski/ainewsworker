@@ -15,6 +15,7 @@ import {
 import {
   parseStructuredDigest,
   assembleAll,
+  DIGEST_JSON_SCHEMA,
   type AssembleOptions,
 } from './digest-builder';
 import type { StructuredDigest } from './types';
@@ -301,11 +302,27 @@ async function compileStructured(
     { total: phase1.feedStats.total, failed: phase1.feedStats.failed },
   );
   const provider = resolveProvider(config, 'standard');
-  const raw = await provider.call(env, 'standard', prompt, 32000);
-  const structured = parseStructuredDigest(raw);
+  // Prefer native structured output (Anthropic tool_use). The model is
+  // mechanically constrained to emit JSON matching DIGEST_JSON_SCHEMA, which
+  // eliminates the entire class of text-mode JSON parse failures (trailing
+  // commas, Polish curly-quote/straight-quote pairing, etc.). Providers
+  // without callJson fall back to text + parseStructuredDigest.
+  let structured: StructuredDigest;
+  if (provider.callJson) {
+    structured = await provider.callJson<StructuredDigest>(
+      env,
+      'standard',
+      prompt,
+      DIGEST_JSON_SCHEMA,
+      32000,
+    );
+  } else {
+    const raw = await provider.call(env, 'standard', prompt, 32000);
+    structured = parseStructuredDigest(raw);
+  }
   const assembled = assembleAll(structured, assembleOptionsFor(phase1));
   console.log(
-    `[Compile] Structured (${config.id}) OK — ` +
+    `[Compile] Structured (${config.id}, ${provider.callJson ? 'tool_use' : 'text'}) OK — ` +
       `EN ${assembled.fullDigestEn.length}c / PL ${assembled.fullDigestPl.length}c, ` +
       `briefings EN ${assembled.briefingEn.length}c / PL ${assembled.briefingPl.length}c`,
   );

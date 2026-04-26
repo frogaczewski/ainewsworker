@@ -128,6 +128,65 @@ const READ_FULL_COVERAGE: Record<Lang, (url: string) => string> = {
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
+// JSON schema for native tool-use (Anthropic) — the model emits a tool_use
+// block whose `input` is validated against this shape on the API server. No
+// more text-mode JSON parsing for callers that use callJson.
+// ──────────────────────────────────────────────────────────────────────────────
+
+const BILINGUAL_TEXT_SCHEMA = {
+  type: 'object',
+  required: ['en', 'pl'],
+  properties: {
+    en: { type: 'string' },
+    pl: { type: 'string' },
+  },
+} as const;
+
+export const DIGEST_JSON_SCHEMA = {
+  type: 'object',
+  required: ['sections', 'gaps', 'marketCommentary', 'macroWatch'],
+  properties: {
+    sections: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['key', 'format', 'stories'],
+        properties: {
+          key: { type: 'string' },
+          format: { type: 'string', enum: ['prose', 'bullets', 'editorial'] },
+          stories: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['link', 'headline', 'body', 'tldr'],
+              properties: {
+                link: { type: 'string' },
+                headline: BILINGUAL_TEXT_SCHEMA,
+                body: BILINGUAL_TEXT_SCHEMA,
+                tldr: BILINGUAL_TEXT_SCHEMA,
+              },
+            },
+          },
+        },
+      },
+    },
+    gaps: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['section', 'note'],
+        properties: {
+          section: { type: 'string' },
+          note: BILINGUAL_TEXT_SCHEMA,
+        },
+      },
+    },
+    marketCommentary: BILINGUAL_TEXT_SCHEMA,
+    macroWatch: BILINGUAL_TEXT_SCHEMA,
+  },
+} as const;
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Parser
 // ──────────────────────────────────────────────────────────────────────────────
 

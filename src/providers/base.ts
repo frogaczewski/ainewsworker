@@ -13,6 +13,17 @@ export interface LLMProvider {
   readonly id: ProviderId;
   modelFor(tier: Tier): string;
   call(env: Env, tier: Tier, prompt: string, maxTokens: number): Promise<string>;
+  // Optional: native structured output via tool-use / function-calling. The
+  // model is constrained to emit JSON matching `schema`; the caller gets back
+  // the already-parsed object instead of a string. Providers without native
+  // support omit this and the caller falls back to text + parse.
+  callJson?<T>(
+    env: Env,
+    tier: Tier,
+    prompt: string,
+    schema: object,
+    maxTokens: number,
+  ): Promise<T>;
 }
 
 // A recipe naming which provider to use at each stage. Same-provider-end-to-end
