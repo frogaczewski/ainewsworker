@@ -134,6 +134,39 @@ const READ_FULL_COVERAGE: Record<Lang, (url: string) => string> = {
 // Mirrors the salvage logic in classify.ts:parseClassifiedJson — strip code
 // fences, slice to the outermost JSON object, fall back to throwing on failure.
 // Returns the parsed StructuredDigest or throws on unrecoverable parse error.
+// Specific, observed-in-the-wild JSON drift patterns Sonnet 4.6 produces in
+// long structured outputs. Each rule is narrow on purpose — broader rewrites
+// risk corrupting valid JSON in edge cases.
+function repairJsonDrift(json: string): string {
+  let out = json;
+
+  // 1. Trailing commas before } or ]. Common at the end of nested objects.
+  out = out.replace(/,(\s*[}\]])/g, '$1');
+
+  // 2. Polish opening curly quote „ (U+201E) closed with straight ASCII " instead
+  //    of the matching curly " (U+201D). The straight " prematurely terminates
+  //    the JSON string, which then breaks because the next characters are
+  //    sentence continuation, not the next JSON property.
+  //
+  //    Repair pattern: „ + content + " + (whitespace + comma + whitespace) +
+  //    Polish/English lowercase letter (sentence continuation, not a JSON key).
+  //    Only fires when the trailing " can't be a legitimate JSON close because
+  //    a JSON key would start with " or be uppercase after the comma.
+  out = out.replace(
+    /„([^"]{1,500})"(\s*,\s*)([a-ząćęłńóśźż])/g,
+    '„$1”$2$3',
+  );
+
+  // 3. Same pattern but no comma — just whitespace + lowercase continuation.
+  //    e.g. `„wstrzymana" i odwołał` (no comma between).
+  out = out.replace(
+    /„([^"]{1,500})"(\s+)([a-ząćęłńóśźż])/g,
+    '„$1”$2$3',
+  );
+
+  return out;
+}
+
 export function parseStructuredDigest(response: string): StructuredDigest {
   let jsonStr = response.trim();
   const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -147,10 +180,8 @@ export function parseStructuredDigest(response: string): StructuredDigest {
   }
   jsonStr = jsonStr.slice(objStart, objEnd + 1);
 
-  // Repair the most common LLM JSON drift (trailing commas) before parsing.
-  // Sonnet 4.6 occasionally emits `... },\n}` or `... ],\n]` even when the
-  // prompt forbids it, especially deep into long structured outputs.
-  jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+  // Repair common LLM JSON drift before parsing.
+  jsonStr = repairJsonDrift(jsonStr);
 
   let parsed: Partial<StructuredDigest>;
   try {

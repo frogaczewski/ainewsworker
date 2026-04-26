@@ -522,8 +522,12 @@ If \`input.gaps\` lists a note for a section, emit a corresponding entry under "
 Any of the following will fail parsing and break the digest. Be especially careful in long outputs where it's easy to drift:
 
 - **No trailing commas** before \`}\` or \`]\`. The last property of an object and the last element of an array do NOT get a comma.
-- **All property names AND string values must use straight double quotes** (\`"\`). Never use single quotes (\`'\`) or curly/smart quotes (\`"\` \`"\` \`„\` \`«\` \`»\`) as JSON delimiters. Smart quotes inside string values are fine.
+- **All property names AND string values must use straight double quotes** (\`"\`) as JSON delimiters. Never use single quotes (\`'\`) as delimiters. Smart/curly quotes inside string values are fine — see the next rule.
 - **Escape internal straight double quotes** inside string values as \`\\"\`. Example: \`"body": { "en": "He said \\"this\\" matters." }\`.
+- **POLISH QUOTATIONS — most common failure mode**. When you quote a word or short phrase inside a Polish string value, use the matched curly pair: opening \`„\` (U+201E) AND closing \`”\` (U+201D, RIGHT DOUBLE QUOTATION MARK). NEVER pair \`„\` with a straight \`"\` — the straight \`"\` terminates the JSON string. Example:
+  - WRONG: \`"pl": "Trump nazwał to „wstrzymaną", co oznacza..."\`  ← straight \`"\` closes the JSON string mid-sentence
+  - RIGHT: \`"pl": "Trump nazwał to „wstrzymaną”, co oznacza..."\`  ← closing curly \`”\` keeps the string intact
+- **English inline quotations** inside string values: prefer the curly pair \`"..."\` (U+201C and U+201D), or escape both as \`\\"...\\"\`. Never use a stray straight \`"\` inside the string.
 - **No JavaScript-style comments** (\`//...\` or \`/* ... */\`).
 - **No \`undefined\`, \`NaN\`, \`Infinity\`** values. If a field has no value, use \`null\` or omit it.
 - **Apostrophes (\`'\`), em-dashes (\`—\`), accented characters (\`ą\`, \`ł\`, \`ś\`, \`ć\`, etc.) and emoji need NO escaping** inside string values — emit them as literal UTF-8.
