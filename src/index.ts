@@ -1215,16 +1215,40 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
     console.log(`[PollCompile] raw record (first 4KB): ${JSON.stringify(record).slice(0, 4000)}`);
   }
 
-  // Succeeded: extract structured input directly (API server already validated
-  // it against DIGEST_JSON_SCHEMA), assemble, send.
-  const structured = extractToolUseInput<StructuredDigest>(record, STRUCTURED_TOOL_NAME);
+  // Succeeded: extract structured input. Anthropic's tool_use sometimes
+  // returns nested arrays/objects as JSON-encoded strings (observed on the
+  // 2026-04-27 test, batch msgbatch_01WT3YRtcGqpWVG8QS8DyMfo, where
+  // `sections` came back as a string despite the schema declaring `type:
+  // array`). Normalise before handing off to assembleAll.
+  const rawStructured = extractToolUseInput<Record<string, unknown>>(record, STRUCTURED_TOOL_NAME);
+  const structured = normaliseStructured(rawStructured);
   console.log(
-    `[PollCompile] structured shape: sectionsType=${typeof (structured as { sections?: unknown }).sections} ` +
-      `sectionsLen=${Array.isArray((structured as { sections?: unknown }).sections) ? (structured as { sections: unknown[] }).sections.length : 'n/a'} ` +
+    `[PollCompile] structured shape: sectionsType=${typeof structured.sections} ` +
+      `sectionsLen=${Array.isArray(structured.sections) ? structured.sections.length : 'n/a'} ` +
       `topKeys=[${Object.keys(structured as object).join(',')}]`,
   );
   await runStageCSendDigest(env, date, structured, !!testMode);
   return true;
+}
+
+// Anthropic's tool_use occasionally surfaces nested arrays / objects as
+// JSON-encoded strings instead of native values. Reverse that for the four
+// known top-level fields of DIGEST_JSON_SCHEMA so assembleAll's iteration
+// over sections / gaps doesn't crash.
+function normaliseStructured(raw: Record<string, unknown>): StructuredDigest {
+  const out: Record<string, unknown> = { ...raw };
+  for (const key of ['sections', 'gaps', 'marketCommentary', 'macroWatch'] as const) {
+    const value = out[key];
+    if (typeof value === 'string') {
+      try {
+        out[key] = JSON.parse(value);
+        console.log(`[PollCompile] normaliseStructured: parsed ${key} from string (${value.length} chars)`);
+      } catch (err) {
+        console.error(`[PollCompile] normaliseStructured: failed to parse ${key} as JSON: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+  }
+  return out as unknown as StructuredDigest;
 }
 
 async function resubmitCompileBatch(
