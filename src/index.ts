@@ -2236,6 +2236,45 @@ export default {
       }
     }
 
+    // POST /test-send-pl?date=test-1 — send the cached Polish briefing to
+    // Filip with `[TEST]` subject prefix. Useful for sanity-checking the PL
+    // assembly without subscribing a Polish recipient. Reads digest:{date}
+    // .emailMarkdownPl which is populated by Stage C.
+    if (url.pathname === '/test-send-pl' && request.method === 'POST') {
+      const date = url.searchParams.get('date') ?? todayUtc();
+      try {
+        const cached = await env.DIGEST_KV.get(`digest:${date}`);
+        if (!cached) {
+          return new Response(JSON.stringify({ error: `No digest:${date}` }), { status: 404, headers: JSON_HEADERS });
+        }
+        const data = JSON.parse(cached) as DigestData;
+        if (!data.emailMarkdownPl) {
+          return new Response(JSON.stringify({ error: `No emailMarkdownPl for ${date}` }), { status: 404, headers: JSON_HEADERS });
+        }
+        const filip = { email: normalizeEmail(EMAIL_TO.email), name: EMAIL_TO.name };
+        const unsubToken = await deriveUnsubToken(env, filip.email, 'pl');
+        const today = new Date();
+        const subject = `[TEST PL] Codzienny Przegląd Wiadomości — ${today.toLocaleDateString('pl-PL', {
+          weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+        })}`;
+        await sendDigestEmail(
+          env,
+          data.emailMarkdownPl,
+          undefined,
+          filip,
+          subject,
+          BASELINE_CONFIG.label,
+          unsubToken,
+        );
+        return new Response(JSON.stringify({ status: 'sent', date, to: filip.email, lang: 'pl' }), { headers: JSON_HEADERS });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), {
+          status: 500,
+          headers: JSON_HEADERS,
+        });
+      }
+    }
+
     // GET /debug-batch-input?date=test-1 — return the raw `sections` string
     // from the day's compile batch, exactly as Anthropic returned it. Useful
     // for debugging JSON-parse failures locally without redeploying.
