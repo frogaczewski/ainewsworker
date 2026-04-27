@@ -1246,25 +1246,28 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
 // returned `sections` stringified at top level and `stories` stringified
 // inside each section. Walk the value recursively and parse any string that
 // looks like a JSON array / object — pure code, no LLM round trip.
-function deepParseJsonStrings(value: unknown): unknown {
+function deepParseJsonStrings(value: unknown, path: string = '$'): unknown {
   if (typeof value === 'string') {
     const trimmed = value.trim();
     if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
       try {
-        return deepParseJsonStrings(JSON.parse(trimmed));
-      } catch {
+        const parsed = JSON.parse(trimmed);
+        console.log(`[Normalise] parsed JSON string at ${path} (${value.length} chars → ${typeof parsed === 'object' ? (Array.isArray(parsed) ? `array[${parsed.length}]` : 'object') : typeof parsed})`);
+        return deepParseJsonStrings(parsed, path);
+      } catch (err) {
+        console.warn(`[Normalise] JSON.parse failed at ${path} (${value.length} chars): ${err instanceof Error ? err.message : err}`);
         return value;
       }
     }
     return value;
   }
   if (Array.isArray(value)) {
-    return value.map(deepParseJsonStrings);
+    return value.map((v, i) => deepParseJsonStrings(v, `${path}[${i}]`));
   }
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = deepParseJsonStrings(v);
+      out[k] = deepParseJsonStrings(v, `${path}.${k}`);
     }
     return out;
   }
@@ -1272,6 +1275,7 @@ function deepParseJsonStrings(value: unknown): unknown {
 }
 
 function normaliseStructured(raw: Record<string, unknown>): StructuredDigest {
+  console.log(`[Normalise] start, top keys=[${Object.keys(raw).join(',')}]`);
   return deepParseJsonStrings(raw) as StructuredDigest;
 }
 
