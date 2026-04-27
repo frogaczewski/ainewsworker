@@ -1090,7 +1090,12 @@ async function runStageBCompose(env: Env, date: string, state: ClassifyBatchStat
     custom_id: customId,
     params: {
       model: SONNET_BATCH_MODEL,
-      max_tokens: 32000,
+      // 64000 — Sonnet 4.6's native output cap. Bilingual EN+PL structured
+      // output with ~80 stories and 300-word prose bodies pushed past 32000
+      // (test on 2026-04-27 hit max_tokens with input={}, see batch
+      // msgbatch_01TsC2do3AvX4t5gDsbaxAA1). Keep this near the model ceiling
+      // until we have a tighter prompt budget.
+      max_tokens: 64000,
       messages: [{ role: 'user', content: compilePrompt }],
       tools: [{
         name: STRUCTURED_TOOL_NAME,
@@ -1175,6 +1180,25 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
     return false;
   }
 
+  // Treat max_tokens truncation as a logical failure of the same severity as
+  // an errored result — Anthropic's batch API surfaces a tool_use block but
+  // discards the partial input, so we'd otherwise crash on `sections is not
+  // iterable` with no clear cause.
+  if (record.result.message?.stop_reason === 'max_tokens') {
+    if (state.retryCount >= 1) {
+      const msg =
+        `[PollCompile] ABORTING — Sonnet compile hit max_tokens twice ` +
+        `(date=${date}, batchId=${state.batchId}, out_tokens=${record.result.message.usage?.output_tokens}). ` +
+        `Increase max_tokens or shrink the prompt.`;
+      console.error(msg);
+      await sendErrorEmail(env, msg).catch(() => undefined);
+      return true;
+    }
+    console.warn(`[PollCompile] Sonnet hit max_tokens, resubmitting once`);
+    await resubmitCompileBatch(env, date, state, testMode);
+    return false;
+  }
+
   // Diagnostic log of the assistant message envelope — stop_reason and usage
   // explain truncation / refusal cases that produce an empty tool_use input.
   const message = record.result.message;
@@ -1224,7 +1248,12 @@ async function resubmitCompileBatch(
     custom_id: customId,
     params: {
       model: SONNET_BATCH_MODEL,
-      max_tokens: 32000,
+      // 64000 — Sonnet 4.6's native output cap. Bilingual EN+PL structured
+      // output with ~80 stories and 300-word prose bodies pushed past 32000
+      // (test on 2026-04-27 hit max_tokens with input={}, see batch
+      // msgbatch_01TsC2do3AvX4t5gDsbaxAA1). Keep this near the model ceiling
+      // until we have a tighter prompt budget.
+      max_tokens: 64000,
       messages: [{ role: 'user', content: compilePrompt }],
       tools: [{
         name: STRUCTURED_TOOL_NAME,
