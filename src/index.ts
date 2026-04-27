@@ -1232,23 +1232,37 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
 }
 
 // Anthropic's tool_use occasionally surfaces nested arrays / objects as
-// JSON-encoded strings instead of native values. Reverse that for the four
-// known top-level fields of DIGEST_JSON_SCHEMA so assembleAll's iteration
-// over sections / gaps doesn't crash.
-function normaliseStructured(raw: Record<string, unknown>): StructuredDigest {
-  const out: Record<string, unknown> = { ...raw };
-  for (const key of ['sections', 'gaps', 'marketCommentary', 'macroWatch'] as const) {
-    const value = out[key];
-    if (typeof value === 'string') {
+// JSON-encoded strings instead of native values. The 2026-04-27 test
+// returned `sections` stringified at top level and `stories` stringified
+// inside each section. Walk the value recursively and parse any string that
+// looks like a JSON array / object — pure code, no LLM round trip.
+function deepParseJsonStrings(value: unknown): unknown {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
       try {
-        out[key] = JSON.parse(value);
-        console.log(`[PollCompile] normaliseStructured: parsed ${key} from string (${value.length} chars)`);
-      } catch (err) {
-        console.error(`[PollCompile] normaliseStructured: failed to parse ${key} as JSON: ${err instanceof Error ? err.message : err}`);
+        return deepParseJsonStrings(JSON.parse(trimmed));
+      } catch {
+        return value;
       }
     }
+    return value;
   }
-  return out as unknown as StructuredDigest;
+  if (Array.isArray(value)) {
+    return value.map(deepParseJsonStrings);
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = deepParseJsonStrings(v);
+    }
+    return out;
+  }
+  return value;
+}
+
+function normaliseStructured(raw: Record<string, unknown>): StructuredDigest {
+  return deepParseJsonStrings(raw) as StructuredDigest;
 }
 
 async function resubmitCompileBatch(
