@@ -2220,6 +2220,41 @@ export default {
       }
     }
 
+    // GET /debug-batch-input?date=test-1 — return the raw `sections` string
+    // from the day's compile batch, exactly as Anthropic returned it. Useful
+    // for debugging JSON-parse failures locally without redeploying.
+    //   Returns text/plain; the body is the unescaped sections value.
+    if (url.pathname === '/debug-batch-input' && request.method === 'GET') {
+      const date = url.searchParams.get('date');
+      if (!date) {
+        return new Response(JSON.stringify({ error: 'date param required' }), { status: 400, headers: JSON_HEADERS });
+      }
+      try {
+        const stateRaw = await env.DIGEST_KV.get(`batch:compile:${date}`);
+        if (!stateRaw) {
+          return new Response(JSON.stringify({ error: `No batch:compile:${date}` }), { status: 404, headers: JSON_HEADERS });
+        }
+        const state = JSON.parse(stateRaw) as CompileBatchState;
+        const results = await getBatchResults(env, state.batchId);
+        const record = results.get(state.customId);
+        if (!record || record.result.type !== 'succeeded' || !record.result.message) {
+          return new Response(JSON.stringify({ error: 'no succeeded result', record }), { status: 404, headers: JSON_HEADERS });
+        }
+        const toolUseBlock = record.result.message.content.find(b => b.type === 'tool_use' && b.name === STRUCTURED_TOOL_NAME);
+        if (!toolUseBlock) {
+          return new Response(JSON.stringify({ error: 'no tool_use block', content: record.result.message.content }), { status: 404, headers: JSON_HEADERS });
+        }
+        return new Response(JSON.stringify(toolUseBlock.input, null, 2), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), {
+          status: 500,
+          headers: JSON_HEADERS,
+        });
+      }
+    }
+
     // POST /test-batched-pipeline — kick off the full A→B→C pipeline in
     // testMode. Polling delays are scaled to 0.1× so the whole flow fits in
     // ~10–25 min of wall clock. Email goes only to Filip with [TEST] subject.
