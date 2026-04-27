@@ -1247,31 +1247,69 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
 // returned `sections` stringified at top level and `stories` stringified
 // inside each section. Walk the value recursively and parse any string that
 // looks like a JSON array / object — pure code, no LLM round trip.
-// Try JSON.parse, falling back to repairJsonDrift on failure. The repair
-// handles trailing commas and the Polish curly-quote / straight-quote
-// pairing that breaks JSON.parse mid-prose (see digest-builder.ts).
+function logParseFailContext(text: string, path: string, errMsg: string, label: string): number | null {
+  const posMatch = errMsg.match(/position (\d+)/);
+  if (!posMatch) return null;
+  const pos = Number(posMatch[1]);
+  const start = Math.max(0, pos - 80);
+  const end = Math.min(text.length, pos + 80);
+  console.warn(`[Normalise] ${label} context at ${path}:${pos}: ...${text.slice(start, pos)}⟪HERE⟫${text.slice(pos, end)}...`);
+  return pos;
+}
+
+// Lossy salvage: for an array-shaped JSON that fails to parse at some
+// position, find the last clean section boundary (`},` between objects)
+// before the error and truncate there, closing the array. Callers ship a
+// partial digest rather than failing the whole pipeline.
+function trySalvageArray(text: string, errorPos: number, path: string): unknown[] | null {
+  const upTo = text.slice(0, errorPos);
+  const lastBoundary = Math.max(
+    upTo.lastIndexOf('},'),
+    upTo.lastIndexOf('}\n,'),
+    upTo.lastIndexOf('} ,'),
+  );
+  if (lastBoundary === -1) return null;
+  const truncated = text.slice(0, lastBoundary + 1) + ']';
+  try {
+    const parsed = JSON.parse(truncated);
+    if (!Array.isArray(parsed)) return null;
+    console.log(`[Normalise] salvaged ${parsed.length} elements at ${path} by truncating to byte ${lastBoundary + 1}`);
+    return parsed;
+  } catch (err) {
+    console.warn(`[Normalise] salvage truncate also failed at ${path}: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
+}
+
+// Try JSON.parse, falling back to repairJsonDrift on failure, then to a
+// truncate-at-last-clean-boundary salvage for arrays. Last resort: return
+// the original string so downstream alarms cleanly rather than crashing.
 function tryParseJson(text: string, path: string): { ok: true; value: unknown } | { ok: false } {
   try {
     return { ok: true, value: JSON.parse(text) };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[Normalise] JSON.parse failed at ${path} (${text.length} chars): ${msg}`);
-    const posMatch = msg.match(/position (\d+)/);
-    if (posMatch) {
-      const pos = Number(posMatch[1]);
-      const start = Math.max(0, pos - 80);
-      const end = Math.min(text.length, pos + 80);
-      console.warn(`[Normalise] context at ${path}:${pos}: ...${text.slice(start, pos)}⟪HERE⟫${text.slice(pos, end)}...`);
-    }
+    logParseFailContext(text, path, msg, 'first-pass');
   }
+
+  // Pass 2: repair known drift patterns, retry.
+  const repaired = repairJsonDrift(text);
   try {
-    const repaired = repairJsonDrift(text);
     const value = JSON.parse(repaired);
     console.log(`[Normalise] parsed after repair at ${path} (${text.length} → ${repaired.length} chars)`);
     return { ok: true, value };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[Normalise] repair-then-parse also failed at ${path}: ${msg}`);
+    console.warn(`[Normalise] repair-then-parse failed at ${path}: ${msg}`);
+    const errorPos = logParseFailContext(repaired, path, msg, 'repaired');
+
+    // Pass 3 (arrays only): salvage the prefix up to the last clean
+    // sibling boundary. Better to ship most of the digest than nothing.
+    if (errorPos !== null && repaired.trim().startsWith('[')) {
+      const salvaged = trySalvageArray(repaired, errorPos, path);
+      if (salvaged) return { ok: true, value: salvaged };
+    }
     return { ok: false };
   }
 }
