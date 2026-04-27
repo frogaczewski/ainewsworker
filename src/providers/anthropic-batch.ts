@@ -86,6 +86,8 @@ export interface AnthropicMessage {
   stop_reason: string | null;
   stop_sequence: string | null;
   usage?: { input_tokens?: number; output_tokens?: number };
+  // Present when stop_reason === 'refusal' — explains why the model declined.
+  stop_details?: { type?: string; category?: string; explanation?: string };
 }
 
 function authHeaders(env: Env): Record<string, string> {

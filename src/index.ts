@@ -1175,6 +1175,22 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
     return false;
   }
 
+  // Diagnostic log of the assistant message envelope — stop_reason and usage
+  // explain truncation / refusal cases that produce an empty tool_use input.
+  const message = record.result.message;
+  if (message) {
+    const usage = message.usage ?? {};
+    console.log(
+      `[PollCompile] message: stop_reason=${message.stop_reason} ` +
+        `out_tokens=${usage.output_tokens ?? '?'} in_tokens=${usage.input_tokens ?? '?'} ` +
+        `stop_details=${message.stop_details ? JSON.stringify(message.stop_details) : 'n/a'}`,
+    );
+    // Truncated raw record dump — first 4 KB. Tool input is just the news
+    // we just submitted, so logging it isn't sensitive. Helps diagnose cases
+    // where the API's input field is at an unexpected path.
+    console.log(`[PollCompile] raw record (first 4KB): ${JSON.stringify(record).slice(0, 4000)}`);
+  }
+
   // Succeeded: extract structured input directly (API server already validated
   // it against DIGEST_JSON_SCHEMA), assemble, send.
   const structured = extractToolUseInput<StructuredDigest>(record, STRUCTURED_TOOL_NAME);
