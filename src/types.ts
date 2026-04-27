@@ -213,6 +213,12 @@ export interface ClassifiedItem {
   country_tags: string[];
   category_tags: string[];
   importance: 'high' | 'medium' | 'low';
+  // Whether the underlying event is fresh ("current"), foreign/retrospective
+  // commentary on an event > 5 days old ("stale_commentary"), or not tied to
+  // a specific date ("evergreen"). `stale_commentary` items are dropped at
+  // the URL-dedup stage. Optional for backwards compatibility with cached
+  // pre-recency runs.
+  event_recency?: 'current' | 'stale_commentary' | 'evergreen';
   editorial?: boolean;
   imageUrl?: string;
   // Populated during Stage 3 (URL dedup + semantic dedup). Lists every outlet

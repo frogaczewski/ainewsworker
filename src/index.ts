@@ -861,7 +861,7 @@ async function runStageA(env: Env, date: string, opts: { testMode?: boolean } = 
       params: {
         model: HAIKU_BATCH_MODEL,
         max_tokens: 12000,
-        messages: [{ role: 'user', content: buildClassificationPrompt(batch) }],
+        messages: [{ role: 'user', content: buildClassificationPrompt(batch, date) }],
       },
     };
   });

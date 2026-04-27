@@ -285,14 +285,16 @@ ${digest}`;
  * No selection happens here — every input item is classified and returned.
  * No cross-batch dedup happens here either (see Stage 3).
  */
-export function buildClassificationPrompt(items: RssItem[]): string {
+export function buildClassificationPrompt(items: RssItem[], todayUtc?: string): string {
   const itemsText = items.map((item, i) =>
     `[${i}] SOURCE: ${item.source}${item.editorial ? ' [EDITORIAL]' : ''}\nTITLE: ${item.title}\nSUMMARY: ${item.summary}\nLINK: ${item.link}\nDATE: ${item.pubDate}`
   ).join('\n\n');
 
+  const dateLine = todayUtc ? `Today (UTC) is ${todayUtc}. Use this when judging event_recency.\n\n` : '';
+
   return `You are tagging news items for a daily digest. The reader lives in Cyprus with ties to Poland and follows technology, climate, science, global politics, and business. Every item below will be classified — do NOT filter anything out, even if it looks uninteresting. Importance ratings handle that.
 
-For EACH item, return a JSON object:
+${dateLine}For EACH item, return a JSON object:
 {
   "link": "carried through exactly",
   "headline": "carried through (translate to English if Polish/Nepali/etc.)",
@@ -300,6 +302,7 @@ For EACH item, return a JSON object:
   "source": "carried through",
   "pubDate": "carried through",
   "importance": "high" | "medium" | "low",
+  "event_recency": "current" | "stale_commentary" | "evergreen",
   "country_tags": ["PL","CY","NP","UA","IL","US","CN","RU","IN","FR","DE","UK","ES","IT","BR","SD","NG","ID","VN","JP","KR","PK","EG","IR","LB",...],
   "category_tags": ["politics","tech_ai","climate","science","business","health","sports","culture","economics","editorial"],
   "editorial": true | false
@@ -331,6 +334,16 @@ For EACH item, return a JSON object:
 - Routine league matches outside the top flight (Championship, third division, minor leagues) — UNLESS it's a historic promotion/relegation involving a well-known club
 - NBA regular-season midweek games, routine injuries, minor transactions
 - Op-eds without news peg, think-pieces rehashing known arguments
+
+## EVENT RECENCY
+
+Decide when the **event** being reported actually happened — not when the article was written. The article's pubDate is recent (it just appeared in the RSS feed); what matters is whether the underlying news is still fresh for a daily digest.
+
+- **"current"** — The event happened in the last ~3 days OR is ongoing right now (active war, this-week's election, today's market move, a court ruling published this week). When in doubt, default here.
+- **"stale_commentary"** — The article is foreign or retrospective commentary on an event that happened more than ~5 days ago. Examples: a column in The Hindu reflecting on Hungary's election from 2 weeks ago; a podcast recap of last month's Fed meeting; an analysis piece about a war milestone from 10 days ago. The event is no longer "today's news".
+- **"evergreen"** — Not tied to a specific recent dated event: scientific research published this week, ongoing investigations without a fresh peg, feature articles, explainers, climate/health long-reads.
+
+`stale_commentary` items are dropped from the daily digest. Be conservative: if the article opens with breaking news framing or quotes officials reacting today, it is "current" even if it references older context.
 
 ## TAGGING RULES
 

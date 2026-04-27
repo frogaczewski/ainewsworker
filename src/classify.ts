@@ -110,7 +110,7 @@ async function classifyOneBatch(
     console.log(`[Classify] Batch ${batchIdx} (${config.id}): KV resume failed (${err}), re-running`);
   }
 
-  const prompt = buildClassificationPrompt(batch);
+  const prompt = buildClassificationPrompt(batch, date);
   const response = await provider.call(env, 'cheap', prompt, 12000);
   const parsed = parseClassifiedJson(response);
 
@@ -197,8 +197,13 @@ function normalizeUrl(url: string): string {
 }
 
 export function urlDedupAndDropLow(items: ClassifiedItem[]): ClassifiedItem[] {
-  const nonLow = items.filter(it => it.importance !== 'low');
-  console.log(`[Dedup] Dropped ${items.length - nonLow.length} 'low' items (kept ${nonLow.length})`);
+  const fresh = items.filter(it => it.event_recency !== 'stale_commentary');
+  const dropStale = items.length - fresh.length;
+  if (dropStale > 0) {
+    console.log(`[Dedup] Dropped ${dropStale} 'stale_commentary' items (kept ${fresh.length})`);
+  }
+  const nonLow = fresh.filter(it => it.importance !== 'low');
+  console.log(`[Dedup] Dropped ${fresh.length - nonLow.length} 'low' items (kept ${nonLow.length})`);
 
   const groups = new Map<string, ClassifiedItem[]>();
   for (const item of nonLow) {
