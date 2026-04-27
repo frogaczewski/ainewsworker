@@ -93,7 +93,52 @@ export type QueueMessage =
       date: string;
       testMode?: boolean;
       onlyTo?: { email: string; name: string };
+    }
+  | {
+      // Self-poll: check the day's classify (Haiku) batch. When ended, drives
+      // Stage B (collect → dedup → select → submit Sonnet batch). Re-enqueues
+      // itself with adaptive delay until the batch ends or the 4-hour budget
+      // is exhausted. See pipeline-batched.ts.
+      kind: 'poll-classify';
+      date: string;
+      attempt: number;
+      testMode?: boolean;
+    }
+  | {
+      // Self-poll: check the day's compile (Sonnet) batch. When ended, drives
+      // Stage C (assemble + send). Re-enqueues itself with adaptive delay.
+      kind: 'poll-compile';
+      date: string;
+      attempt: number;
+      testMode?: boolean;
     };
+
+// Persisted state for the day's batched-Haiku classification. Written by
+// Stage A (after submitting the batch), read by every poll-classify invocation.
+// 7-day TTL.
+export interface ClassifyBatchState {
+  batchId: string;
+  submittedAt: number;            // ms since epoch — drives the 4-hour budget
+  customIdToBatchIdx: Record<string, number>;
+  totalRequests: number;
+  sortedItems: RssItem[];
+  weather: WeatherData[];
+  markets: MarketData;
+  feedStats: { total: number; failed: number; succeeded: number };
+  interestItems: Record<string, CuratedInterestItem[]>;
+  testMode?: boolean;
+}
+
+// Persisted state for the day's Sonnet structured-compile batch. Written by
+// Stage B (after submitting the single-request batch), read by every
+// poll-compile invocation.
+export interface CompileBatchState {
+  batchId: string;
+  submittedAt: number;
+  customId: string;
+  retryCount: number;             // 0 or 1 — second errored result aborts
+  testMode?: boolean;
+}
 
 // Persisted output of Phase 1 — everything Phase 2 needs to compile + send.
 // Lives at `phase1:{date}` in KV, 7-day TTL.

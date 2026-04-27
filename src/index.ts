@@ -20,12 +20,26 @@ import {
 } from './digest-builder';
 import type { StructuredDigest } from './types';
 import {
+  BATCH_SIZE,
   classifyInBatches,
+  distributeBySource,
+  parseClassifiedJson,
   urlDedupAndDropLow,
   semanticDedup,
   selectForDigest,
   selectedToFlat,
 } from './classify';
+import {
+  buildClassificationPrompt,
+} from './prompts';
+import {
+  submitBatch,
+  getBatchStatus,
+  getBatchResults,
+  extractText,
+  extractToolUseInput,
+  type BatchRequest,
+} from './providers/anthropic-batch';
 import { sendDigestEmail, sendErrorEmail, type InlineImage } from './email';
 import { generateDigestImage } from './image';
 import { EMAIL_TO, EMAIL_TO_PL } from './config';
@@ -68,7 +82,10 @@ import {
   sendUnsubscribeConfirmEmail,
 } from './subscriber-emails';
 import type {
+  ClassifyBatchState,
+  CompileBatchState,
   CuratedInterestItem,
+  ClassifiedItem,
   Env,
   DigestData,
   Phase1Output,
@@ -689,6 +706,621 @@ async function runTestVariant(
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Batched async pipeline (Anthropic Message Batches API).
+//
+// Three queue-driven stages replace the legacy single-cron Phase 1 / Phase 2
+// streaming flow. Each invocation is one ~30s worker call; progression
+// between stages is driven by self-polling queue messages with adaptive
+// `delaySeconds`.
+//
+//   23:00 UTC  Stage A — fetch + submit Haiku classification batch.
+//                        Enqueues poll-classify (5 min delay).
+//   ?         poll-classify — when batch ends, runs dedup + select +
+//                        submits Sonnet structured-compile batch, then
+//                        enqueues poll-compile.
+//   ?         poll-compile — when batch ends, runs assembleAll + send.
+//   01:00 UTC  cron fallback for poll-classify (no-op if Stage B done).
+//   03:00 UTC  cron fallback for poll-compile  (no-op if Stage C done).
+//   04:30 UTC  watchdog alarms if `digest:lastSuccess != date`.
+//
+// Why this exists: the streaming Sonnet call hit Cloudflare's 15-min queue
+// wall-time ceiling repeatedly when Anthropic returned empty/stalled streams
+// (see exceededCpu / wallTimeMs=899996 incidents in late April 2026). The
+// batches API is async with a 24-hour SLA — no streaming, no per-attempt
+// timeout cascade burning the worker budget. 50% cost discount is incidental.
+// ──────────────────────────────────────────────────────────────────────────────
+
+const HAIKU_BATCH_MODEL = 'claude-haiku-4-5-20251001';
+const SONNET_BATCH_MODEL = 'claude-sonnet-4-6';
+const STRUCTURED_TOOL_NAME = 'emit_structured_output';
+
+// Stage B time budget — past this, we accept partial results if at least
+// half succeeded, otherwise abort + alarm. Anchored to the Stage A submission
+// time so a stuck Anthropic batch doesn't perpetually defer.
+const STAGE_B_BUDGET_MS = 4 * 60 * 60 * 1000;
+
+// Adaptive re-poll delays for an in_progress Haiku batch. Picked as a
+// function of elapsed time since Stage A submission so we poll cheaply early
+// and tighten as the 4-hour budget approaches.
+function haikuRepollDelaySeconds(elapsedMs: number, testMode: boolean): number {
+  const scale = testMode ? 0.1 : 1;
+  if (elapsedMs < 60 * 60 * 1000) return Math.round(300 * scale);          // < 1h: 5 min
+  if (elapsedMs < 3 * 60 * 60 * 1000) return Math.round(900 * scale);       // 1–3h: 15 min
+  if (elapsedMs < STAGE_B_BUDGET_MS) return Math.round(300 * scale);        // 3–4h: 5 min (urgent)
+  return Math.round(1800 * scale);                                          // ≥ 4h: 30 min (watchdog handles)
+}
+
+function sonnetRepollDelaySeconds(elapsedMs: number, testMode: boolean): number {
+  const scale = testMode ? 0.1 : 1;
+  if (elapsedMs < 60 * 60 * 1000) return Math.round(300 * scale);  // < 1h: 5 min
+  return Math.round(180 * scale);                                  // ≥ 1h: 3 min
+}
+
+function customIdForClassifyBatch(date: string, batchIdx: number): string {
+  return `classify-${date}-${batchIdx}`;
+}
+
+function customIdForCompile(date: string): string {
+  return `compile-${date}`;
+}
+
+// Carry imageUrl from RssItem→ClassifiedItem. The classification prompt
+// doesn't ask for it, so it gets dropped on the round trip; we restore it
+// from a (link → imageUrl) lookup over the original RSS items.
+function carryImageUrls(items: ClassifiedItem[], rssItems: RssItem[]): void {
+  const imagesByLink = new Map<string, string>();
+  for (const item of rssItems) {
+    if (item.imageUrl && item.link) imagesByLink.set(item.link, item.imageUrl);
+  }
+  for (const it of items) {
+    if (!it.imageUrl && it.link && imagesByLink.has(it.link)) {
+      it.imageUrl = imagesByLink.get(it.link);
+    }
+  }
+}
+
+// Stage A: fetch RSS / weather / markets / interests, slice the items into
+// source-diverse batches, submit ONE Haiku classification batch, persist
+// the state needed for Stage B, enqueue the first poll-classify.
+//
+// Idempotent: if `batch:classify:{date}` already exists for the day, exit
+// early — the queued poll handler is still in flight (or watchdog will
+// surface a stuck batch). Re-running this for the same date never submits
+// twice.
+async function runStageA(env: Env, date: string, opts: { testMode?: boolean } = {}): Promise<void> {
+  const testMode = !!opts.testMode;
+
+  const existingRaw = await env.DIGEST_KV.get(`batch:classify:${date}`);
+  if (existingRaw) {
+    console.log(`[StageA] batch:classify:${date} already exists — skipping submit (idempotent)`);
+    return;
+  }
+
+  console.log(`[StageA] Starting${testMode ? ' (testMode)' : ''} for ${date}`);
+
+  const [feedResult, weather, markets] = await Promise.all([
+    fetchAllFeeds(),
+    fetchWeather(),
+    fetchMarketData(),
+  ]);
+
+  console.log(`[StageA] RSS: ${feedResult.items.length} items from ${feedResult.total - feedResult.failed}/${feedResult.total} feeds`);
+  if (feedResult.errors.length > 0) {
+    console.log(`[StageA] Feed errors: ${feedResult.errors.join('; ')}`);
+  }
+  if (feedResult.items.length === 0) {
+    throw new Error('[StageA] No RSS items fetched — all feeds failed');
+  }
+
+  const sortedItems = [...feedResult.items].sort((a, b) => {
+    const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
+    const db = b.pubDate ? new Date(b.pubDate).getTime() : 0;
+    return db - da;
+  });
+
+  // Cache raw RSS for variant pipelines (existing behavior). Non-fatal.
+  try {
+    await env.DIGEST_KV.put(`rss:${date}`, JSON.stringify(sortedItems), {
+      expirationTtl: PHASE1_TTL_SECONDS,
+    });
+  } catch (err) {
+    console.log(`[StageA] KV write rss:${date} failed (non-fatal): ${err}`);
+  }
+
+  // Per-person interest sections — sync Haiku call against curated sources.
+  // Small enough to keep inline; non-fatal failure (returns {}).
+  let interestItems: Record<string, CuratedInterestItem[]> = {};
+  try {
+    interestItems = await fetchPerPersonInterests(env, BASELINE_CONFIG);
+  } catch (err) {
+    console.log(`[StageA] fetchPerPersonInterests failed (non-fatal): ${err}`);
+  }
+
+  // Source-diverse round-robin batching: each source's items get spread
+  // across all batches so a single batch failure can't wipe out one outlet.
+  const batches = distributeBySource(sortedItems, BATCH_SIZE);
+  const customIdToBatchIdx: Record<string, number> = {};
+  const requests: BatchRequest[] = batches.map((batch, idx) => {
+    const customId = customIdForClassifyBatch(date, idx);
+    customIdToBatchIdx[customId] = idx;
+    return {
+      custom_id: customId,
+      params: {
+        model: HAIKU_BATCH_MODEL,
+        max_tokens: 12000,
+        messages: [{ role: 'user', content: buildClassificationPrompt(batch) }],
+      },
+    };
+  });
+
+  const { id: batchId } = await submitBatch(env, requests);
+  console.log(`[StageA] Submitted Haiku batch ${batchId} with ${requests.length} requests`);
+
+  const state: ClassifyBatchState = {
+    batchId,
+    submittedAt: Date.now(),
+    customIdToBatchIdx,
+    totalRequests: requests.length,
+    sortedItems,
+    weather,
+    markets,
+    feedStats: {
+      total: feedResult.total,
+      failed: feedResult.failed,
+      succeeded: feedResult.total - feedResult.failed,
+    },
+    interestItems,
+    testMode,
+  };
+  await env.DIGEST_KV.put(`batch:classify:${date}`, JSON.stringify(state), {
+    expirationTtl: PHASE1_TTL_SECONDS,
+  });
+  await env.DIGEST_KV.put('digest:stageASuccess', date, { expirationTtl: PHASE1_TTL_SECONDS });
+
+  // Enqueue first self-poll. 5 min default; 30 s in test mode.
+  await env.DIGEST_QUEUE.send({
+    kind: 'poll-classify',
+    date,
+    attempt: 1,
+    testMode: testMode || undefined,
+  }, { delaySeconds: testMode ? 30 : 300 });
+  console.log(`[StageA] Enqueued first poll-classify (delay=${testMode ? 30 : 300}s)`);
+}
+
+// Stage B core: read the day's Haiku batch, decide what to do based on
+// processing_status + request_counts, and either: re-enqueue ourselves with
+// adaptive delay; proceed (collect results, dedup, select, submit Sonnet
+// batch); or abort with alarm.
+//
+// Returns true when Stage B's work is complete (Sonnet batch submitted),
+// false when we re-enqueued and should ack. Throws on unrecoverable error.
+async function pollClassifyOnce(env: Env, date: string, attempt: number, testMode: boolean): Promise<boolean> {
+  // If Stage C is already in flight (or done), stop polling Haiku.
+  const stageBDone = await env.DIGEST_KV.get('digest:stageBSuccess');
+  if (stageBDone === date) {
+    console.log(`[PollClassify] Stage B already done for ${date} — skipping`);
+    return true;
+  }
+
+  const stateRaw = await env.DIGEST_KV.get(`batch:classify:${date}`);
+  if (!stateRaw) {
+    throw new Error(`[PollClassify] No batch:classify:${date} in KV — Stage A never ran`);
+  }
+  const state = JSON.parse(stateRaw) as ClassifyBatchState;
+
+  const status = await getBatchStatus(env, state.batchId);
+  const elapsedMs = Date.now() - state.submittedAt;
+  const total = state.totalRequests;
+  const succeeded = status.request_counts.succeeded;
+  const rate = total > 0 ? succeeded / total : 0;
+
+  console.log(
+    `[PollClassify] attempt=${attempt} batchId=${state.batchId} status=${status.processing_status} ` +
+      `processing=${status.request_counts.processing} succeeded=${succeeded}/${total} ` +
+      `elapsedMin=${Math.round(elapsedMs / 60000)}`,
+  );
+
+  if (status.processing_status === 'canceling') {
+    // Treat canceling as terminal-ish; fall through to next poll.
+    await reEnqueuePollClassify(env, date, attempt, haikuRepollDelaySeconds(elapsedMs, testMode), testMode);
+    return false;
+  }
+
+  if (status.processing_status === 'in_progress') {
+    if (elapsedMs >= STAGE_B_BUDGET_MS) {
+      // Past 4h still in_progress. Anthropic should have ended the batch by
+      // now — keep polling slowly; the watchdog will alarm at 04:30 if the
+      // digest didn't ship.
+      console.warn(`[PollClassify] batch still in_progress past 4h budget — continuing to poll`);
+    }
+    await reEnqueuePollClassify(env, date, attempt, haikuRepollDelaySeconds(elapsedMs, testMode), testMode);
+    return false;
+  }
+
+  // status === 'ended' from here on. request_counts is now meaningful.
+  if (rate < 0.5) {
+    if (elapsedMs >= STAGE_B_BUDGET_MS) {
+      const msg =
+        `[PollClassify] ABORTING — batch ended with only ${succeeded}/${total} succeeded ` +
+        `(${Math.round(rate * 100)}%), past 4h budget`;
+      console.error(msg);
+      await sendErrorEmail(env, msg).catch(() => undefined);
+      return true; // ack — nothing more to do
+    }
+    // Re-poll in 1h hoping for a manual intervention or better understanding.
+    // Ended is final on Anthropic's side, but we honour the user's "wait 1h"
+    // policy before giving up.
+    console.warn(`[PollClassify] ended below 50% (${succeeded}/${total}) — waiting 1h before final decision`);
+    await reEnqueuePollClassify(env, date, attempt, testMode ? 360 : 3600, testMode);
+    return false;
+  }
+
+  if (rate < 0.8 && elapsedMs < STAGE_B_BUDGET_MS) {
+    // 50–80% with budget remaining: wait 1h then accept whatever's there.
+    console.log(`[PollClassify] ended at ${Math.round(rate * 100)}% — waiting 1h before proceeding`);
+    await reEnqueuePollClassify(env, date, attempt, testMode ? 360 : 3600, testMode);
+    return false;
+  }
+
+  // Proceed: rate ≥ 0.8, OR rate ≥ 0.5 and budget exhausted.
+  console.log(`[PollClassify] Proceeding to Stage B compose (rate=${Math.round(rate * 100)}%)`);
+  await runStageBCompose(env, date, state);
+  return true;
+}
+
+async function reEnqueuePollClassify(
+  env: Env,
+  date: string,
+  attempt: number,
+  delaySeconds: number,
+  testMode: boolean,
+): Promise<void> {
+  await env.DIGEST_QUEUE.send(
+    { kind: 'poll-classify', date, attempt: attempt + 1, testMode: testMode || undefined },
+    { delaySeconds },
+  );
+  console.log(`[PollClassify] Re-enqueued (attempt=${attempt + 1}, delay=${delaySeconds}s)`);
+}
+
+// Drives the second half of Stage B: download Haiku results, run dedup +
+// select, write phase1, submit Sonnet structured-compile batch, enqueue
+// first poll-compile.
+async function runStageBCompose(env: Env, date: string, state: ClassifyBatchState): Promise<void> {
+  const results = await getBatchResults(env, state.batchId);
+
+  // Reassemble classified items by custom_id. Failed/missing custom_ids
+  // contribute zero items — same fail-soft shape as the legacy
+  // classifyInBatches Promise.allSettled behavior.
+  const allClassified: ClassifiedItem[] = [];
+  let parsedBatches = 0;
+  let failedBatches = 0;
+  for (const [customId, batchIdx] of Object.entries(state.customIdToBatchIdx)) {
+    const record = results.get(customId);
+    if (!record || record.result.type !== 'succeeded') {
+      failedBatches++;
+      console.log(`[StageB] Batch ${batchIdx} (${customId}) result missing or non-succeeded`);
+      continue;
+    }
+    try {
+      const text = extractText(record);
+      const items = parseClassifiedJson(text);
+      allClassified.push(...items);
+      parsedBatches++;
+    } catch (err) {
+      failedBatches++;
+      console.log(`[StageB] Batch ${batchIdx} parse failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  console.log(
+    `[StageB] Parsed ${parsedBatches}/${parsedBatches + failedBatches} batches → ${allClassified.length} classified items`,
+  );
+
+  if (allClassified.length === 0) {
+    throw new Error('[StageB] No classified items extracted from Haiku batch results');
+  }
+
+  carryImageUrls(allClassified, state.sortedItems);
+
+  // URL dedup → semantic dedup (sync Haiku, small) → balance-aware select.
+  const urlDeduped = urlDedupAndDropLow(allClassified);
+  const fullyDeduped = await semanticDedup(env, BASELINE_CONFIG, urlDeduped);
+  const selectedInput = selectForDigest(fullyDeduped);
+  console.log(
+    `[StageB] Selection: ${selectedInput.sections.length} sections, ` +
+      `${selectedInput.sections.reduce((n, s) => n + s.stories.length, 0)} stories`,
+  );
+  const triagedStories = selectedToFlat(selectedInput);
+
+  // Build the storyImages map (mirrors runPhase1 logic).
+  const imagesByLink = new Map<string, string>();
+  for (const item of state.sortedItems) {
+    if (item.imageUrl && item.link) imagesByLink.set(item.link, item.imageUrl);
+  }
+  for (const story of triagedStories) {
+    if (!story.imageUrl && story.link && imagesByLink.has(story.link)) {
+      story.imageUrl = imagesByLink.get(story.link);
+    }
+  }
+  const storyImages: Record<string, string> = {};
+  for (const story of triagedStories) {
+    if (story.imageUrl && story.link) {
+      const baseUrl = story.link.split('?')[0];
+      storyImages[baseUrl] = story.imageUrl;
+      if (baseUrl !== story.link) storyImages[story.link] = story.imageUrl;
+    }
+  }
+
+  const phase1: Phase1Output = {
+    date,
+    selectedInput,
+    triagedStories,
+    weather: state.weather,
+    markets: state.markets,
+    feedStats: state.feedStats,
+    storyImages,
+    interestItems: state.interestItems,
+  };
+
+  await env.DIGEST_KV.put(`phase1:${date}`, JSON.stringify(phase1), {
+    expirationTtl: PHASE1_TTL_SECONDS,
+  });
+  await env.DIGEST_KV.put('digest:phase1Success', date);
+
+  // Submit the single-request Sonnet structured-compile batch. Same prompt
+  // and tool_use schema as the streaming compileStructured path; the API
+  // server validates the tool_use input against DIGEST_JSON_SCHEMA.
+  const compilePrompt = buildStructuredCompilationPrompt(
+    selectedInput,
+    state.markets,
+    { total: state.feedStats.total, failed: state.feedStats.failed },
+  );
+  const customId = customIdForCompile(date);
+  const { id: compileBatchId } = await submitBatch(env, [{
+    custom_id: customId,
+    params: {
+      model: SONNET_BATCH_MODEL,
+      max_tokens: 32000,
+      messages: [{ role: 'user', content: compilePrompt }],
+      tools: [{
+        name: STRUCTURED_TOOL_NAME,
+        description: 'Emit the structured digest output. The model MUST invoke this tool — its `input` is parsed and used directly downstream.',
+        input_schema: DIGEST_JSON_SCHEMA,
+      }],
+      tool_choice: { type: 'tool', name: STRUCTURED_TOOL_NAME },
+    },
+  }]);
+  console.log(`[StageB] Submitted Sonnet compile batch ${compileBatchId}`);
+
+  const compileState: CompileBatchState = {
+    batchId: compileBatchId,
+    submittedAt: Date.now(),
+    customId,
+    retryCount: 0,
+    testMode: state.testMode,
+  };
+  await env.DIGEST_KV.put(`batch:compile:${date}`, JSON.stringify(compileState), {
+    expirationTtl: PHASE1_TTL_SECONDS,
+  });
+  await env.DIGEST_KV.put('digest:stageBSuccess', date, { expirationTtl: PHASE1_TTL_SECONDS });
+
+  await env.DIGEST_QUEUE.send(
+    { kind: 'poll-compile', date, attempt: 1, testMode: state.testMode || undefined },
+    { delaySeconds: state.testMode ? 30 : 300 },
+  );
+  console.log(`[StageB] Enqueued first poll-compile`);
+}
+
+// Stage C core: poll the day's Sonnet compile batch and either re-enqueue
+// or run assembleAll + send. Returns true when done (ack), false when
+// re-enqueued.
+async function pollCompileOnce(env: Env, date: string, attempt: number, testMode: boolean): Promise<boolean> {
+  const lastSuccess = await env.DIGEST_KV.get('digest:lastSuccess');
+  if (lastSuccess === date) {
+    console.log(`[PollCompile] digest:lastSuccess=${date} — already shipped, skipping`);
+    return true;
+  }
+
+  const stateRaw = await env.DIGEST_KV.get(`batch:compile:${date}`);
+  if (!stateRaw) {
+    throw new Error(`[PollCompile] No batch:compile:${date} in KV — Stage B never ran`);
+  }
+  const state = JSON.parse(stateRaw) as CompileBatchState;
+
+  const status = await getBatchStatus(env, state.batchId);
+  const elapsedMs = Date.now() - state.submittedAt;
+  console.log(
+    `[PollCompile] attempt=${attempt} batchId=${state.batchId} status=${status.processing_status} ` +
+      `processing=${status.request_counts.processing} succeeded=${status.request_counts.succeeded} ` +
+      `errored=${status.request_counts.errored} elapsedMin=${Math.round(elapsedMs / 60000)}`,
+  );
+
+  if (status.processing_status === 'in_progress' || status.processing_status === 'canceling') {
+    await env.DIGEST_QUEUE.send(
+      { kind: 'poll-compile', date, attempt: attempt + 1, testMode: testMode || undefined },
+      { delaySeconds: sonnetRepollDelaySeconds(elapsedMs, testMode) },
+    );
+    return false;
+  }
+
+  // status === 'ended' — fetch the single result.
+  const results = await getBatchResults(env, state.batchId);
+  const record = results.get(state.customId);
+  if (!record) {
+    throw new Error(`[PollCompile] No result for ${state.customId} in batch ${state.batchId}`);
+  }
+
+  if (record.result.type !== 'succeeded') {
+    if (state.retryCount >= 1) {
+      const msg =
+        `[PollCompile] ABORTING — Sonnet compile batch errored twice ` +
+        `(date=${date}, batchId=${state.batchId}, last result=${record.result.type})`;
+      console.error(msg);
+      await sendErrorEmail(env, msg).catch(() => undefined);
+      return true;
+    }
+    // First failure — resubmit the same prompt as a fresh batch.
+    console.warn(`[PollCompile] Sonnet result=${record.result.type}, resubmitting once`);
+    await resubmitCompileBatch(env, date, state, testMode);
+    return false;
+  }
+
+  // Succeeded: extract structured input directly (API server already validated
+  // it against DIGEST_JSON_SCHEMA), assemble, send.
+  const structured = extractToolUseInput<StructuredDigest>(record, STRUCTURED_TOOL_NAME);
+  await runStageCSendDigest(env, date, structured, !!testMode);
+  return true;
+}
+
+async function resubmitCompileBatch(
+  env: Env,
+  date: string,
+  state: CompileBatchState,
+  testMode: boolean,
+): Promise<void> {
+  const phase1Raw = await env.DIGEST_KV.get(`phase1:${date}`);
+  if (!phase1Raw) {
+    throw new Error(`[PollCompile] Cannot resubmit — phase1:${date} missing from KV`);
+  }
+  const phase1 = JSON.parse(phase1Raw) as Phase1Output;
+  const compilePrompt = buildStructuredCompilationPrompt(
+    phase1.selectedInput,
+    phase1.markets,
+    { total: phase1.feedStats.total, failed: phase1.feedStats.failed },
+  );
+  const customId = customIdForCompile(date);
+  const { id: newBatchId } = await submitBatch(env, [{
+    custom_id: customId,
+    params: {
+      model: SONNET_BATCH_MODEL,
+      max_tokens: 32000,
+      messages: [{ role: 'user', content: compilePrompt }],
+      tools: [{
+        name: STRUCTURED_TOOL_NAME,
+        description: 'Emit the structured digest output. The model MUST invoke this tool — its `input` is parsed and used directly downstream.',
+        input_schema: DIGEST_JSON_SCHEMA,
+      }],
+      tool_choice: { type: 'tool', name: STRUCTURED_TOOL_NAME },
+    },
+  }]);
+  const newState: CompileBatchState = {
+    batchId: newBatchId,
+    submittedAt: Date.now(),
+    customId,
+    retryCount: state.retryCount + 1,
+    testMode: state.testMode,
+  };
+  await env.DIGEST_KV.put(`batch:compile:${date}`, JSON.stringify(newState), {
+    expirationTtl: PHASE1_TTL_SECONDS,
+  });
+  await env.DIGEST_QUEUE.send(
+    { kind: 'poll-compile', date, attempt: 1, testMode: testMode || undefined },
+    { delaySeconds: testMode ? 30 : 180 },
+  );
+  console.log(`[PollCompile] Resubmitted Sonnet batch ${newBatchId} (retry=${newState.retryCount})`);
+}
+
+// Stage C terminal step: assemble the four markdown forms from the
+// structured Sonnet output and dispatch emails. Mirrors the runPhase2
+// post-compile flow.
+async function runStageCSendDigest(
+  env: Env,
+  date: string,
+  structured: StructuredDigest,
+  testMode: boolean,
+): Promise<void> {
+  const phase1Raw = await env.DIGEST_KV.get(`phase1:${date}`);
+  if (!phase1Raw) {
+    throw new Error(`[StageC] phase1:${date} missing — Stage B did not write it`);
+  }
+  const phase1 = JSON.parse(phase1Raw) as Phase1Output;
+
+  const assembled = assembleAll(structured, assembleOptionsFor(phase1));
+  console.log(
+    `[StageC] Assembled — EN ${assembled.fullDigestEn.length}c / PL ${assembled.fullDigestPl.length}c, ` +
+      `briefings EN ${assembled.briefingEn.length}c / PL ${assembled.briefingPl.length}c`,
+  );
+
+  await persistDigest(env, phase1, {
+    digestMarkdown: assembled.fullDigestEn,
+    emailMarkdown: assembled.briefingEn,
+    digestMarkdownPl: assembled.fullDigestPl,
+    emailMarkdownPl: assembled.briefingPl,
+    structuredDigest: JSON.stringify(structured),
+  });
+
+  let inlineImage: InlineImage | undefined;
+  if (env.ENABLE_DIGEST_IMAGE === 'true') {
+    const img = await generateDigestImage(env, assembled.briefingEn).catch(err => {
+      console.log(`[StageC] Image generation threw (non-fatal): ${err instanceof Error ? err.message : err}`);
+      return null;
+    });
+    if (img) inlineImage = img;
+  }
+
+  await sendAllEmails(env, assembled.briefingEn, assembled.briefingPl, {
+    testMode,
+    inlineImage,
+    interestItems: phase1.interestItems,
+  });
+
+  try {
+    await env.DIGEST_KV.put('digest:lastSuccess', date);
+  } catch (err) {
+    console.error(`[StageC] Heartbeat write failed (non-fatal): ${err}`);
+  }
+  await pingExternalHeartbeat(env);
+  console.log(`[StageC] Complete for ${date}`);
+}
+
+// Cron fallback wrappers — invoked at 01 UTC and 03 UTC. They never call the
+// poll handlers directly. Instead they enqueue a fresh poll message: the
+// queue's max_concurrency=1 serializes handler runs, and the in-handler
+// stageBSuccess / lastSuccess guards make duplicate enqueues safe. A direct
+// sync poll could race a concurrently-running queue handler and double-submit
+// the Sonnet batch.
+async function checkpointStageB(env: Env, date: string): Promise<void> {
+  const stageBDone = await env.DIGEST_KV.get('digest:stageBSuccess');
+  if (stageBDone === date) {
+    console.log(`[Checkpoint01] Stage B already done for ${date}`);
+    return;
+  }
+  const stateRaw = await env.DIGEST_KV.get(`batch:classify:${date}`);
+  if (!stateRaw) {
+    console.warn(`[Checkpoint01] No batch:classify:${date} — Stage A never ran today`);
+    return;
+  }
+  const state = JSON.parse(stateRaw) as ClassifyBatchState;
+  await env.DIGEST_QUEUE.send({
+    kind: 'poll-classify',
+    date,
+    attempt: 0,
+    testMode: state.testMode || undefined,
+  });
+  console.log(`[Checkpoint01] Re-enqueued poll-classify for ${date}`);
+}
+
+async function checkpointStageC(env: Env, date: string): Promise<void> {
+  const lastSuccess = await env.DIGEST_KV.get('digest:lastSuccess');
+  if (lastSuccess === date) {
+    console.log(`[Checkpoint03] Already shipped for ${date}`);
+    return;
+  }
+  const stateRaw = await env.DIGEST_KV.get(`batch:compile:${date}`);
+  if (!stateRaw) {
+    console.warn(`[Checkpoint03] No batch:compile:${date} — Stage B never ran today`);
+    return;
+  }
+  const state = JSON.parse(stateRaw) as CompileBatchState;
+  await env.DIGEST_QUEUE.send({
+    kind: 'poll-compile',
+    date,
+    attempt: 0,
+    testMode: state.testMode || undefined,
+  });
+  console.log(`[Checkpoint03] Re-enqueued poll-compile for ${date}`);
+}
+
 // GET the monitor URL on Phase 2 success. Silent no-op if not configured;
 // logs but doesn't throw if the ping fails — a failed ping must never cause
 // us to mark Phase 2 as failed.
@@ -974,67 +1606,53 @@ async function runDryRun(env: Env): Promise<string> {
 // ──────────────────────────────────────────────────────────────────────────────
 
 async function handleScheduled(event: ScheduledEvent, env: Env): Promise<void> {
+  // The day for which we should ship a digest is "today UTC" at 23:00 cron
+  // boundary too — Stage A submits a batch for the next morning's edition,
+  // and todayUtc() at 23:00 is already the date the email will carry.
   const today = todayUtc();
 
-  if (event.cron === '0 4 * * *') {
-    // Watchdog: 30 min after the retry cron. A separate invocation with its
-    // own 15-min budget, so it runs cleanly even if earlier crons were killed
-    // by the platform (exceededCpu / wall-time) before their own error-email
-    // handlers could fire — which is exactly what happened on 2026-04-23.
+  if (event.cron === '30 4 * * *') {
+    // Watchdog: 30 min after the latest planned cron. A separate invocation
+    // with its own 15-min budget, so it runs cleanly even if earlier crons
+    // were killed by the platform.
     await runWatchdog(env, today);
     return;
   }
 
-  if (event.cron === '30 3 * * *') {
-    // Retry path. Look at what already succeeded today and re-trigger only
-    // the missing phase rather than redoing everything.
-    const lastSuccess = await env.DIGEST_KV.get('digest:lastSuccess');
-    if (lastSuccess === today) {
-      console.log(`[Retry] Heartbeat ${lastSuccess} matches today — already succeeded, skipping`);
-      return;
-    }
-
-    const phase1Success = await env.DIGEST_KV.get('digest:phase1Success');
-    if (phase1Success === today) {
-      console.log('[Retry] Phase 1 already done — re-enqueueing Phase 2');
-      try {
-        await env.DIGEST_QUEUE.send({ kind: 'compile-and-send', date: today });
-        await enqueueVariants(env, today);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[Retry] Failed to enqueue Phase 2: ${msg}`);
-        await sendErrorEmail(env, `Phase 1 succeeded but enqueueing Phase 2 retry failed: ${msg}`).catch(() => undefined);
-      }
-      return;
-    }
-
-    console.log('[Retry] Re-running Phase 1...');
+  if (event.cron === '0 23 * * *') {
+    // Stage A — fetch RSS, submit Haiku classification batch, enqueue first
+    // poll-classify. Variants (currently disabled) still go through the
+    // legacy queue path; enqueue them here so they ride the existing flow.
     try {
-      await runPhase1(env);
-      await env.DIGEST_QUEUE.send({ kind: 'compile-and-send', date: today });
+      await runStageA(env, today);
       await enqueueVariants(env, today);
+      console.log('[Pipeline] Stage A complete');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[Retry] Phase 1 retry failed: ${msg}`);
-      await sendErrorEmail(env, `Both 03:00 and 03:30 UTC Phase-1 runs failed today (${today}).\n\n${msg}`).catch(() => undefined);
+      console.error(`[Pipeline] Stage A failed: ${msg}`);
+      await sendErrorEmail(env, `Stage A failed for ${today}: ${msg}`).catch(() => undefined);
     }
     return;
   }
 
-  // Primary 03:00 path. Stay silent on failure — the 03:30 retry will alarm if both fail.
-  try {
-    await runPhase1(env);
-    await env.DIGEST_QUEUE.send({ kind: 'compile-and-send', date: today });
-    await enqueueVariants(env, today);
-    console.log('[Pipeline] Phase 1 complete; Phase 2 enqueued');
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[Pipeline] Primary Phase 1 failed (will retry at 03:30): ${msg}`);
+  if (event.cron === '0 1 * * *') {
+    // Belt-and-suspenders: if poll-classify never ran (e.g. queue message lost),
+    // run one poll iteration synchronously here. No-op if Stage B already done.
+    await checkpointStageB(env, today);
+    return;
   }
+
+  if (event.cron === '0 3 * * *') {
+    // Same idea for Stage C.
+    await checkpointStageC(env, today);
+    return;
+  }
+
+  console.warn(`[Pipeline] Unknown cron trigger: ${event.cron}`);
 }
 
 // Watchdog: silent if today's digest shipped, else emails frogaczewski@gmail.com
-// with enough context to diagnose. Summarises which phase completed and points
+// with enough context to diagnose. Summarises which stage completed and points
 // to the recovery endpoint so the fix is a one-liner.
 async function runWatchdog(env: Env, today: string): Promise<void> {
   const lastSuccess = await env.DIGEST_KV.get('digest:lastSuccess');
@@ -1043,36 +1661,49 @@ async function runWatchdog(env: Env, today: string): Promise<void> {
     return;
   }
 
-  const phase1Success = await env.DIGEST_KV.get('digest:phase1Success');
-  const phase1Done = phase1Success === today;
+  const stageA = await env.DIGEST_KV.get('digest:stageASuccess');
+  const stageB = await env.DIGEST_KV.get('digest:stageBSuccess');
+  const phase1 = await env.DIGEST_KV.get('digest:phase1Success');
+  const stageADone = stageA === today;
+  const stageBDone = stageB === today;
+  const phase1Done = phase1 === today;
 
   const lines: string[] = [
-    `The ${today} digest has NOT completed by 04:00 UTC.`,
+    `The ${today} digest has NOT completed by 04:30 UTC.`,
     '',
-    `digest:lastSuccess   = ${lastSuccess ?? '<unset>'}`,
-    `digest:phase1Success = ${phase1Success ?? '<unset>'}`,
+    `digest:lastSuccess     = ${lastSuccess ?? '<unset>'}`,
+    `digest:stageASuccess   = ${stageA ?? '<unset>'}`,
+    `digest:stageBSuccess   = ${stageB ?? '<unset>'}`,
+    `digest:phase1Success   = ${phase1 ?? '<unset>'}`,
     '',
   ];
 
-  if (phase1Done) {
+  const baseUrl = 'https://ainewsworker.rogaczewski-dev.workers.dev';
+  if (stageBDone || phase1Done) {
     lines.push(
-      'Phase 1 succeeded but Phase 2 did not ship. Most likely causes:',
-      '  • Queue message landed in DLQ (check wrangler tail for [DLQ] logs).',
-      '  • Sonnet compilation / email send failing repeatedly.',
+      'Stage B succeeded — Sonnet compile is in flight or failed.',
+      'Inspect batch:compile:{date} in KV; rerun Stage C:',
+      `  curl -X POST "${baseUrl}/run-stage-c?date=${today}"`,
       '',
-      'Fastest recovery — Phase 1 state is still in KV:',
-      '  curl -X POST "https://ainewsworker.rogaczewski-dev.workers.dev/run-phase-2"',
-      '',
-      'If the emailMarkdown was already generated and you just need to resend:',
-      '  curl -X POST "https://ainewsworker.rogaczewski-dev.workers.dev/resend"',
+      'If the structured digest already landed and you just need to resend:',
+      `  curl -X POST "${baseUrl}/resend"`,
+    );
+  } else if (stageADone) {
+    lines.push(
+      'Stage A succeeded — Haiku batch is still in flight, or Stage B failed.',
+      'Inspect batch:classify:{date} in KV; force one Stage B poll iteration:',
+      `  curl -X POST "${baseUrl}/run-stage-b?date=${today}"`,
     );
   } else {
     lines.push(
-      'Phase 1 never completed today. Both the 03:00 primary and 03:30 retry',
-      'must have failed or been killed by the platform.',
+      'Stage A never completed today. The 23 UTC cron must have failed or',
+      'been killed by the platform.',
       '',
-      'Fastest recovery — full fresh pipeline:',
-      '  curl -X POST --max-time 900 "https://ainewsworker.rogaczewski-dev.workers.dev/run"',
+      'Fastest recovery — submit the full batched pipeline now:',
+      `  curl -X POST "${baseUrl}/run-stage-a?date=${today}"`,
+      '',
+      'Or fall back to the legacy synchronous flow:',
+      `  curl -X POST --max-time 900 "${baseUrl}/run"`,
     );
   }
 
@@ -1128,6 +1759,30 @@ async function handleQueue(batch: MessageBatch<QueueMessage>, env: Env): Promise
         } else {
           console.log(`[Queue] compile-and-send for ${body.date} (testMode=${!!body.testMode})`);
           await runPhase2(env, body.date, { testMode: body.testMode });
+        }
+        msg.ack();
+      } else if (body.kind === 'poll-classify') {
+        // Always ack on success OR error — if we threw partway through Stage
+        // B compose (e.g. after the Sonnet batch was submitted but before KV
+        // state was persisted), a queue-driven retry would cause a duplicate
+        // Sonnet submission. The 01/03 UTC cron fallbacks pick up missed work.
+        console.log(`[Queue] poll-classify for ${body.date} (attempt=${body.attempt}, testMode=${!!body.testMode})`);
+        try {
+          await pollClassifyOnce(env, body.date, body.attempt, !!body.testMode);
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.error(`[Queue] poll-classify threw for ${body.date}: ${errMsg}`);
+          await sendErrorEmail(env, `[poll-classify] ${body.date}: ${errMsg}`).catch(() => undefined);
+        }
+        msg.ack();
+      } else if (body.kind === 'poll-compile') {
+        console.log(`[Queue] poll-compile for ${body.date} (attempt=${body.attempt}, testMode=${!!body.testMode})`);
+        try {
+          await pollCompileOnce(env, body.date, body.attempt, !!body.testMode);
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.error(`[Queue] poll-compile threw for ${body.date}: ${errMsg}`);
+          await sendErrorEmail(env, `[poll-compile] ${body.date}: ${errMsg}`).catch(() => undefined);
         }
         msg.ack();
       } else if (body.kind === 'resend') {
@@ -1306,6 +1961,95 @@ export default {
         }
         await env.DIGEST_QUEUE.send({ kind: 'compile-and-send', date, testMode });
         return new Response(JSON.stringify({ status: 'enqueued', date, testMode }), { headers: JSON_HEADERS });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return new Response(JSON.stringify({ status: 'error', error: message }), {
+          status: 500,
+          headers: JSON_HEADERS,
+        });
+      }
+    }
+
+    // POST /run-stage-a — manually kick off Stage A (fetch + submit Haiku
+    // batch). Idempotent: skips if today's batch:classify already exists.
+    //   ?date=YYYY-MM-DD     → override date (defaults to todayUtc()).
+    //   ?test=true           → testMode: compressed polling, [TEST] email only.
+    if (url.pathname === '/run-stage-a' && request.method === 'POST') {
+      const date = url.searchParams.get('date') ?? todayUtc();
+      const testMode = url.searchParams.get('test') === 'true';
+      try {
+        await runStageA(env, date, { testMode });
+        return new Response(JSON.stringify({ status: 'submitted', date, testMode }), { headers: JSON_HEADERS });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return new Response(JSON.stringify({ status: 'error', error: message }), {
+          status: 500,
+          headers: JSON_HEADERS,
+        });
+      }
+    }
+
+    // POST /run-stage-b — synchronously run one poll-classify iteration.
+    // Useful when poll-classify never fired (lost queue message) or to nudge
+    // a stuck classify batch.
+    //   ?date=YYYY-MM-DD     → override date.
+    if (url.pathname === '/run-stage-b' && request.method === 'POST') {
+      const date = url.searchParams.get('date') ?? todayUtc();
+      try {
+        const stateRaw = await env.DIGEST_KV.get(`batch:classify:${date}`);
+        if (!stateRaw) {
+          return new Response(
+            JSON.stringify({ status: 'not-found', error: `No batch:classify:${date} — run /run-stage-a first` }),
+            { status: 404, headers: JSON_HEADERS },
+          );
+        }
+        const state = JSON.parse(stateRaw) as ClassifyBatchState;
+        const done = await pollClassifyOnce(env, date, 0, !!state.testMode);
+        return new Response(JSON.stringify({ status: done ? 'done' : 'in-progress', date }), { headers: JSON_HEADERS });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return new Response(JSON.stringify({ status: 'error', error: message }), {
+          status: 500,
+          headers: JSON_HEADERS,
+        });
+      }
+    }
+
+    // POST /run-stage-c — synchronously run one poll-compile iteration.
+    //   ?date=YYYY-MM-DD     → override date.
+    if (url.pathname === '/run-stage-c' && request.method === 'POST') {
+      const date = url.searchParams.get('date') ?? todayUtc();
+      try {
+        const stateRaw = await env.DIGEST_KV.get(`batch:compile:${date}`);
+        if (!stateRaw) {
+          return new Response(
+            JSON.stringify({ status: 'not-found', error: `No batch:compile:${date} — Stage B hasn't run` }),
+            { status: 404, headers: JSON_HEADERS },
+          );
+        }
+        const state = JSON.parse(stateRaw) as CompileBatchState;
+        const done = await pollCompileOnce(env, date, 0, !!state.testMode);
+        return new Response(JSON.stringify({ status: done ? 'done' : 'in-progress', date }), { headers: JSON_HEADERS });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return new Response(JSON.stringify({ status: 'error', error: message }), {
+          status: 500,
+          headers: JSON_HEADERS,
+        });
+      }
+    }
+
+    // POST /test-batched-pipeline — kick off the full A→B→C pipeline in
+    // testMode. Polling delays are scaled to 0.1× so the whole flow fits in
+    // ~10–25 min of wall clock. Email goes only to Filip with [TEST] subject.
+    if (url.pathname === '/test-batched-pipeline' && request.method === 'POST') {
+      const date = url.searchParams.get('date') ?? todayUtc();
+      try {
+        await runStageA(env, date, { testMode: true });
+        return new Response(
+          JSON.stringify({ status: 'submitted', date, testMode: true, note: 'poll-classify will run in 30s; check /run-stage-b or wait for self-poll' }),
+          { headers: JSON_HEADERS },
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return new Response(JSON.stringify({ status: 'error', error: message }), {

@@ -13,8 +13,34 @@ import type {
 // Stage 2: batched Haiku classification with per-batch KV checkpoints
 // ==============================================================================
 
-const BATCH_SIZE = 75;
+export const BATCH_SIZE = 75;
 const MAX_PARALLEL = 3;
+
+// Round-robin distribute items across N batches so each RSS source's items are
+// spread evenly. Without this, a single failed batch could drop most or all of
+// one source's items (the legacy contiguous slicing meant up to 75 consecutive
+// Reuters items could land in one batch). Worst case after this: each source
+// loses ceil(srcCount/numBatches) items per batch failure.
+//
+// Returned batches differ in length by at most 1.
+export function distributeBySource(items: RssItem[], batchSize: number): RssItem[][] {
+  const numBatches = Math.max(1, Math.ceil(items.length / batchSize));
+  const bySource = new Map<string, RssItem[]>();
+  for (const item of items) {
+    const arr = bySource.get(item.source);
+    if (arr) arr.push(item);
+    else bySource.set(item.source, [item]);
+  }
+  const batches: RssItem[][] = Array.from({ length: numBatches }, () => []);
+  let cursor = 0;
+  for (const queue of bySource.values()) {
+    for (const item of queue) {
+      batches[cursor % numBatches].push(item);
+      cursor++;
+    }
+  }
+  return batches;
+}
 
 export async function classifyInBatches(
   env: Env,
@@ -22,11 +48,8 @@ export async function classifyInBatches(
   items: RssItem[],
   date: string,
 ): Promise<ClassifiedItem[]> {
-  const batches: RssItem[][] = [];
-  for (let i = 0; i < items.length; i += BATCH_SIZE) {
-    batches.push(items.slice(i, i + BATCH_SIZE));
-  }
-  console.log(`[Classify] Split ${items.length} items into ${batches.length} batches of up to ${BATCH_SIZE}`);
+  const batches = distributeBySource(items, BATCH_SIZE);
+  console.log(`[Classify] Split ${items.length} items into ${batches.length} source-diverse batches`);
 
   const results: ClassifiedItem[][] = new Array(batches.length).fill(null).map(() => []);
 
@@ -118,7 +141,7 @@ async function classifyOneBatch(
   return parsed;
 }
 
-function parseClassifiedJson(response: string): ClassifiedItem[] {
+export function parseClassifiedJson(response: string): ClassifiedItem[] {
   let jsonStr = response.trim();
   const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenceMatch) jsonStr = fenceMatch[1].trim();

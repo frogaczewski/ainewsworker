@@ -32,25 +32,29 @@ binding = "DIGEST_KV"
 id = "ef7d3c8046664432a3632f8a5777a95a"
 
 # --- Queues ---
-# Two-phase pipeline: cron runs Phase 1 (data collection → KV) and then enqueues
-# a job; the queue consumer picks it up in a fresh invocation with its own
-# 15-min wall budget and runs Phase 2 (compile + send). This decouples the slow
-# Sonnet compilation from the upstream RSS/classify work, so a slow LLM call
-# can no longer take the whole digest down with it.
+# The queue carries two flavours of work:
 #
-# The queues themselves are NOT created by wrangler — they're a one-time CLI:
+# 1. Async-pipeline self-polls (poll-classify, poll-compile). Each Stage A
+#    submission enqueues a delayed poll-classify; when the Anthropic Haiku
+#    batch ends, that handler runs Stage B (collect → dedup → select → submit
+#    Sonnet batch) and enqueues poll-compile, which similarly drives Stage C.
+#    Self-polls always msg.ack() — never msg.retry() — to avoid duplicate
+#    Anthropic batch submissions; the 01/03 UTC cron fallbacks recover lost
+#    messages.
+#
+# 2. Legacy compile-and-send / resend / variant messages. Same handler, kept
+#    so /resend and disabled A/B variants keep working.
+#
+# The queues themselves are created via:
 #   npx wrangler queues create ainewsworker-digest
 #   npx wrangler queues create ainewsworker-digest-dlq
-#
-# Producer: cron handler + /run + /resend write here
 [[queues.producers]]
 binding = "DIGEST_QUEUE"
 queue = "ainewsworker-digest"
 
 # Consumer for the main queue. max_batch_size=1 so each digest run gets the
-# full per-invocation budget; max_concurrency=1 so we never have two Phase-2
-# runs racing on the same KV state. Failed messages get up to 2 retries,
-# then move to the DLQ.
+# full per-invocation budget; max_concurrency=1 so we never have two Stage-B
+# or Stage-C runs racing on the same KV state.
 [[queues.consumers]]
 queue = "ainewsworker-digest"
 max_batch_size = 1
@@ -69,11 +73,15 @@ max_retries = 0
 max_concurrency = 1
 
 [triggers]
-# 03:00 UTC primary Phase-1; 03:30 UTC retry; 04:00 UTC watchdog that alarms
-# if the day's digest still hasn't shipped (covers the case where an earlier
-# invocation was killed by the platform before its own sendErrorEmail could run).
-# The cron only runs Phase 1 directly — Phase 2 is queue-driven.
-crons = ["0 3 * * *", "30 3 * * *", "0 4 * * *"]
+# Async batched pipeline (see src/index.ts § "Batched async pipeline"):
+#   23:00 UTC  Stage A — fetch RSS + submit Haiku classification batch.
+#   01:00 UTC  Stage B fallback — checkpoint poll-classify (no-op if Stage B
+#                                  already advanced via the queue self-poll).
+#   03:00 UTC  Stage C fallback — checkpoint poll-compile (no-op if shipped).
+#   04:30 UTC  Watchdog — alarm email if `digest:lastSuccess != date`.
+# Between the crons, queue-delayed self-polls (poll-classify / poll-compile)
+# drive progression as soon as each Anthropic batch ends.
+crons = ["0 23 * * *", "0 1 * * *", "0 3 * * *", "30 4 * * *"]
 
 # All secrets are already set in the Cloudflare dashboard:
 # CLAUDE_PLATFORM_API  — Anthropic API key
