@@ -196,16 +196,38 @@ export function extractText(record: BatchResultRecord): string {
 
 // Pull the tool_use input JSON out of a succeeded result. Used for the Sonnet
 // structured-compile call where the model is forced to invoke the
-// emit_structured_output tool. The API has already validated `input` against
-// the schema — no JSON.parse needed, no salvage logic.
+// emit_structured_output tool.
+//
+// Anthropic's typing says `input: map[unknown]` (already parsed object), but
+// in practice some payload paths surface it as a JSON string — fall back to
+// parsing if that's what we get. Logs a one-line shape summary so future
+// shape mismatches are debuggable from tail without re-running.
 export function extractToolUseInput<T = unknown>(record: BatchResultRecord, toolName: string): T {
   if (record.result.type !== 'succeeded' || !record.result.message) {
     throw new Error(`[Batch] extractToolUseInput called on non-succeeded result (${record.custom_id}): ${record.result.type}`);
   }
-  for (const block of record.result.message.content) {
+  const blocks = record.result.message.content;
+  const blockSummary = blocks.map(b => `${b.type}${b.type === 'tool_use' ? `:${b.name ?? '?'}` : ''}`).join(',');
+  for (const block of blocks) {
     if (block.type === 'tool_use' && block.name === toolName && block.input !== undefined) {
-      return block.input as T;
+      const raw = block.input;
+      if (typeof raw === 'string') {
+        // Defensive: some response paths return the input as a JSON string.
+        try {
+          const parsed = JSON.parse(raw) as T;
+          console.log(`[Batch] extractToolUseInput: parsed string input (${raw.length} chars) for ${record.custom_id}`);
+          return parsed;
+        } catch (err) {
+          throw new Error(`[Batch] tool_use input was a string but not valid JSON for ${record.custom_id}: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+      if (raw && typeof raw === 'object') {
+        const keys = Object.keys(raw as Record<string, unknown>).join(',');
+        console.log(`[Batch] extractToolUseInput: input keys=[${keys}] blocks=[${blockSummary}] for ${record.custom_id}`);
+        return raw as T;
+      }
+      throw new Error(`[Batch] tool_use input had unexpected type "${typeof raw}" for ${record.custom_id}`);
     }
   }
-  throw new Error(`[Batch] No tool_use block named "${toolName}" in result for ${record.custom_id}`);
+  throw new Error(`[Batch] No tool_use block named "${toolName}" in result for ${record.custom_id}. Blocks: [${blockSummary}]`);
 }

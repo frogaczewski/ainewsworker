@@ -1178,6 +1178,11 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
   // Succeeded: extract structured input directly (API server already validated
   // it against DIGEST_JSON_SCHEMA), assemble, send.
   const structured = extractToolUseInput<StructuredDigest>(record, STRUCTURED_TOOL_NAME);
+  console.log(
+    `[PollCompile] structured shape: sectionsType=${typeof (structured as { sections?: unknown }).sections} ` +
+      `sectionsLen=${Array.isArray((structured as { sections?: unknown }).sections) ? (structured as { sections: unknown[] }).sections.length : 'n/a'} ` +
+      `topKeys=[${Object.keys(structured as object).join(',')}]`,
+  );
   await runStageCSendDigest(env, date, structured, !!testMode);
   return true;
 }
