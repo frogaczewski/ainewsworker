@@ -14,6 +14,7 @@ import {
 } from './prompts';
 import {
   parseStructuredDigest,
+  repairJsonDrift,
   assembleAll,
   DIGEST_JSON_SCHEMA,
   type AssembleOptions,
@@ -1246,18 +1247,45 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
 // returned `sections` stringified at top level and `stories` stringified
 // inside each section. Walk the value recursively and parse any string that
 // looks like a JSON array / object — pure code, no LLM round trip.
+// Try JSON.parse, falling back to repairJsonDrift on failure. The repair
+// handles trailing commas and the Polish curly-quote / straight-quote
+// pairing that breaks JSON.parse mid-prose (see digest-builder.ts).
+function tryParseJson(text: string, path: string): { ok: true; value: unknown } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[Normalise] JSON.parse failed at ${path} (${text.length} chars): ${msg}`);
+    const posMatch = msg.match(/position (\d+)/);
+    if (posMatch) {
+      const pos = Number(posMatch[1]);
+      const start = Math.max(0, pos - 80);
+      const end = Math.min(text.length, pos + 80);
+      console.warn(`[Normalise] context at ${path}:${pos}: ...${text.slice(start, pos)}⟪HERE⟫${text.slice(pos, end)}...`);
+    }
+  }
+  try {
+    const repaired = repairJsonDrift(text);
+    const value = JSON.parse(repaired);
+    console.log(`[Normalise] parsed after repair at ${path} (${text.length} → ${repaired.length} chars)`);
+    return { ok: true, value };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[Normalise] repair-then-parse also failed at ${path}: ${msg}`);
+    return { ok: false };
+  }
+}
+
 function deepParseJsonStrings(value: unknown, path: string = '$'): unknown {
   if (typeof value === 'string') {
     const trimmed = value.trim();
     if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        console.log(`[Normalise] parsed JSON string at ${path} (${value.length} chars → ${typeof parsed === 'object' ? (Array.isArray(parsed) ? `array[${parsed.length}]` : 'object') : typeof parsed})`);
-        return deepParseJsonStrings(parsed, path);
-      } catch (err) {
-        console.warn(`[Normalise] JSON.parse failed at ${path} (${value.length} chars): ${err instanceof Error ? err.message : err}`);
-        return value;
+      const result = tryParseJson(trimmed, path);
+      if (result.ok) {
+        console.log(`[Normalise] parsed JSON string at ${path} (${value.length} chars → ${typeof result.value === 'object' ? (Array.isArray(result.value) ? `array[${result.value.length}]` : 'object') : typeof result.value})`);
+        return deepParseJsonStrings(result.value, path);
       }
+      return value;
     }
     return value;
   }

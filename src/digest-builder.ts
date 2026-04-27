@@ -196,7 +196,7 @@ export const DIGEST_JSON_SCHEMA = {
 // Specific, observed-in-the-wild JSON drift patterns Sonnet 4.6 produces in
 // long structured outputs. Each rule is narrow on purpose — broader rewrites
 // risk corrupting valid JSON in edge cases.
-function repairJsonDrift(json: string): string {
+export function repairJsonDrift(json: string): string {
   let out = json;
 
   // 1. Trailing commas before } or ]. Common at the end of nested objects.
