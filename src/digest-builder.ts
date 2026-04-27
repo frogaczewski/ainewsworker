@@ -223,6 +223,20 @@ export function repairJsonDrift(json: string): string {
     '„$1”$2$3',
   );
 
+  // 4. Polish curly-quote pair closed with straight " right before the JSON
+  //    string terminator. e.g. `"pl": "...„izraelską agresję""` — the model
+  //    means the first " as the Polish close and the second as the JSON
+  //    terminator, but JSON.parse sees "...agresję" as the value and the
+  //    trailing " as a stray character. Two adjacent " inside a string
+  //    position are unambiguously this bug — empty-string `""` only appears
+  //    after `:` with no preceding „ … " pair.
+  //    Observed on 2026-04-27 batch msgbatch_01WT3YRtcGqpWVG8QS8DyMfo at
+  //    position 4376 ("„izraelską agresję""").
+  out = out.replace(
+    /„([^"]{1,500})""/g,
+    '„$1”"',
+  );
+
   return out;
 }
 
