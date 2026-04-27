@@ -15,6 +15,7 @@ import {
 import {
   parseStructuredDigest,
   repairJsonDrift,
+  escapeStrayQuotes,
   assembleAll,
   DIGEST_JSON_SCHEMA,
   type AssembleOptions,
@@ -1302,12 +1303,27 @@ function tryParseJson(text: string, path: string): { ok: true; value: unknown } 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[Normalise] repair-then-parse failed at ${path}: ${msg}`);
-    const errorPos = logParseFailContext(repaired, path, msg, 'repaired');
+    logParseFailContext(repaired, path, msg, 'repaired');
+  }
 
-    // Pass 3 (arrays only): salvage the prefix up to the last clean
-    // sibling boundary. Better to ship most of the digest than nothing.
-    if (errorPos !== null && repaired.trim().startsWith('[')) {
-      const salvaged = trySalvageArray(repaired, errorPos, path);
+  // Pass 3: stateful walk that escapes any straight `"` stuck mid-prose
+  // (model emits unescaped emphasis quotes like `"national side,"`).
+  // Verified locally on the failing test-1 sample — recovers all 18
+  // sections after rewriting 28 stray quotes.
+  const escaped = escapeStrayQuotes(repaired);
+  try {
+    const value = JSON.parse(escaped);
+    console.log(`[Normalise] parsed after escapeStrayQuotes at ${path} (${repaired.length} → ${escaped.length} chars)`);
+    return { ok: true, value };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[Normalise] escape-then-parse failed at ${path}: ${msg}`);
+    const errorPos = logParseFailContext(escaped, path, msg, 'escaped');
+
+    // Pass 4 (arrays only): truncate at the last clean `},` boundary so
+    // we ship a partial digest rather than nothing.
+    if (errorPos !== null && escaped.trim().startsWith('[')) {
+      const salvaged = trySalvageArray(escaped, errorPos, path);
       if (salvaged) return { ok: true, value: salvaged };
     }
     return { ok: false };

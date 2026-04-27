@@ -240,6 +240,56 @@ export function repairJsonDrift(json: string): string {
   return out;
 }
 
+// Stateful walk that rewrites `"` characters that are stuck inside a string
+// value (the model used straight " for English emphasis like `Hungary's
+// "national side,"` without escaping). When we see `"` inside a string, we
+// peek at the next non-whitespace character: if it's not a legal post-string
+// token (`,` `:` `]` `}` or end), the quote is mid-prose and we replace it
+// with `\"`. Catches drift the regex rules can't (no Polish curly-quote
+// neighbour to anchor on).
+//
+// Verified on 2026-04-27 batch msgbatch_01WT3YRtcGqpWVG8QS8DyMfo (180 KB
+// input, 28 stray quotes rewritten, JSON parsed cleanly into 18 sections).
+export function escapeStrayQuotes(text: string): string {
+  let out = '';
+  let i = 0;
+  let inString = false;
+  while (i < text.length) {
+    const c = text[i];
+    if (inString && c === '\\' && i + 1 < text.length) {
+      // Pass through any escape sequence verbatim.
+      out += c + text[i + 1];
+      i += 2;
+      continue;
+    }
+    if (c === '"') {
+      if (!inString) {
+        inString = true;
+        out += c;
+        i++;
+        continue;
+      }
+      // Inside a string — is this a legitimate close? Peek.
+      let j = i + 1;
+      while (j < text.length && (text[j] === ' ' || text[j] === '\t' || text[j] === '\n' || text[j] === '\r')) j++;
+      const next = text[j] ?? '';
+      if (next === ',' || next === ':' || next === ']' || next === '}' || next === '') {
+        inString = false;
+        out += c;
+        i++;
+      } else {
+        // Stray quote mid-prose — escape it and stay in the string.
+        out += '\\"';
+        i++;
+      }
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
+}
+
 export function parseStructuredDigest(response: string): StructuredDigest {
   let jsonStr = response.trim();
   const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
