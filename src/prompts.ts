@@ -343,7 +343,7 @@ Decide when the **event** being reported actually happened — not when the arti
 - **"stale_commentary"** — The article is foreign or retrospective commentary on an event that happened more than ~5 days ago. Examples: a column in The Hindu reflecting on Hungary's election from 2 weeks ago; a podcast recap of last month's Fed meeting; an analysis piece about a war milestone from 10 days ago. The event is no longer "today's news".
 - **"evergreen"** — Not tied to a specific recent dated event: scientific research published this week, ongoing investigations without a fresh peg, feature articles, explainers, climate/health long-reads.
 
-`stale_commentary` items are dropped from the daily digest. Be conservative: if the article opens with breaking news framing or quotes officials reacting today, it is "current" even if it references older context.
+**stale_commentary** items are dropped from the daily digest. Be conservative: if the article opens with breaking news framing or quotes officials reacting today, it is "current" even if it references older context.
 
 ## TAGGING RULES
 
