@@ -103,6 +103,16 @@ function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Date label for the digest about to be prepared at 23 UTC. Used by Stage A
+// only — at 23 UTC the UTC day hasn't ticked over yet but the email ships the
+// next morning, so the digest is labeled with tomorrow's UTC date. The 01/03
+// UTC fallbacks already see the rolled-over `todayUtc()` and stay consistent.
+function tomorrowUtc(): string {
+  const t = new Date();
+  t.setUTCDate(t.getUTCDate() + 1);
+  return t.toISOString().slice(0, 10);
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Phase 1: data collection (RSS → classify → dedup → select).
 // Writes phase1:{date} and selected:{date} to KV. Cheap to re-run.
@@ -1621,16 +1631,19 @@ async function handleScheduled(event: ScheduledEvent, env: Env): Promise<void> {
 
   if (event.cron === '0 23 * * *') {
     // Stage A — fetch RSS, submit Haiku classification batch, enqueue first
-    // poll-classify. Variants (currently disabled) still go through the
-    // legacy queue path; enqueue them here so they ride the existing flow.
+    // poll-classify. Use tomorrow's UTC date because the email ships at ~03
+    // UTC the next morning; labeling it with today (the cron's UTC day) would
+    // give recipients an email dated "yesterday".
+    // Variants (currently disabled) still go through the legacy queue path.
+    const digestDate = tomorrowUtc();
     try {
-      await runStageA(env, today);
-      await enqueueVariants(env, today);
-      console.log('[Pipeline] Stage A complete');
+      await runStageA(env, digestDate);
+      await enqueueVariants(env, digestDate);
+      console.log(`[Pipeline] Stage A complete for ${digestDate}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[Pipeline] Stage A failed: ${msg}`);
-      await sendErrorEmail(env, `Stage A failed for ${today}: ${msg}`).catch(() => undefined);
+      await sendErrorEmail(env, `Stage A failed for ${digestDate}: ${msg}`).catch(() => undefined);
     }
     return;
   }
