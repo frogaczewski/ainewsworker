@@ -1227,6 +1227,16 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
       `sectionsLen=${Array.isArray(structured.sections) ? structured.sections.length : 'n/a'} ` +
       `topKeys=[${Object.keys(structured as object).join(',')}]`,
   );
+  if (Array.isArray(structured.sections)) {
+    structured.sections.forEach((s, i) => {
+      const section = s as { key?: string; stories?: unknown };
+      console.log(
+        `[PollCompile] section[${i}] key=${section.key} ` +
+          `storiesType=${typeof section.stories} ` +
+          `storiesLen=${Array.isArray(section.stories) ? section.stories.length : 'n/a'}`,
+      );
+    });
+  }
   await runStageCSendDigest(env, date, structured, !!testMode);
   return true;
 }
