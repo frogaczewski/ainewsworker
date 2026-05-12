@@ -1,5 +1,9 @@
 import { resolveProvider, type VariantConfig } from './providers';
-import { buildClassificationPrompt, buildSemanticDedupPrompt } from './prompts';
+import {
+  buildClassificationPrompt,
+  buildSemanticDedupPrompt,
+  buildPerSectionDedupPrompt,
+} from './prompts';
 import type {
   Env,
   RssItem,
@@ -196,6 +200,97 @@ function normalizeUrl(url: string): string {
   }
 }
 
+// ==============================================================================
+// Cross-day memory: rolling 7-day list of already-shipped story links.
+// Prevents the same URL from appearing in two consecutive days' digests
+// (Nissan UK closure on 5 + 6 May, etc.).
+// ==============================================================================
+
+const SEEN_KV_KEY = 'seen:rolling7d';
+const SEEN_TTL_SECONDS = 60 * 60 * 24 * 14; // KV TTL — rolling window itself is 7d
+const SEEN_WINDOW_DAYS = 7;
+
+interface SeenEntry {
+  link: string;       // normalised URL
+  runDate: string;    // YYYY-MM-DD when first shipped
+}
+
+function isoDaysAgo(isoDate: string, today: string): number {
+  const a = Date.parse(`${isoDate}T00:00:00Z`);
+  const b = Date.parse(`${today}T00:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b)) return Infinity;
+  return Math.round((b - a) / (1000 * 60 * 60 * 24));
+}
+
+export async function loadSeenLinks(env: Env, today: string): Promise<Set<string>> {
+  try {
+    const raw = await env.DIGEST_KV.get(SEEN_KV_KEY);
+    if (!raw) return new Set();
+    const entries = JSON.parse(raw) as SeenEntry[];
+    const out = new Set<string>();
+    for (const e of entries) {
+      if (!e.link || !e.runDate) continue;
+      // Only treat items from PRIOR days as "already shown" — same-day re-runs
+      // (interrupted pipelines) must not drop today's own work.
+      if (e.runDate >= today) continue;
+      const age = isoDaysAgo(e.runDate, today);
+      if (age <= SEEN_WINDOW_DAYS) out.add(e.link);
+    }
+    return out;
+  } catch (err) {
+    console.log(`[Dedup] loadSeenLinks failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+    return new Set();
+  }
+}
+
+export async function recordSeenLinks(
+  env: Env,
+  items: { link: string }[],
+  runDate: string,
+): Promise<void> {
+  if (items.length === 0) return;
+  let existing: SeenEntry[] = [];
+  try {
+    const raw = await env.DIGEST_KV.get(SEEN_KV_KEY);
+    if (raw) existing = JSON.parse(raw) as SeenEntry[];
+  } catch (err) {
+    console.log(`[Dedup] recordSeenLinks read failed: ${err instanceof Error ? err.message : err}`);
+  }
+  const fresh: SeenEntry[] = [];
+  for (const e of existing) {
+    if (!e?.link || !e?.runDate) continue;
+    const age = isoDaysAgo(e.runDate, runDate);
+    if (age <= SEEN_WINDOW_DAYS) fresh.push(e);
+  }
+  const seen = new Set(fresh.map(e => e.link));
+  for (const item of items) {
+    const link = normalizeUrl(item.link);
+    if (!seen.has(link)) {
+      fresh.push({ link, runDate });
+      seen.add(link);
+    }
+  }
+  try {
+    await env.DIGEST_KV.put(SEEN_KV_KEY, JSON.stringify(fresh), { expirationTtl: SEEN_TTL_SECONDS });
+    console.log(`[Dedup] recordSeenLinks: ${fresh.length} entries (added ${items.length} from ${runDate})`);
+  } catch (err) {
+    console.log(`[Dedup] recordSeenLinks write failed: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
+export function dropAlreadySeen(
+  items: ClassifiedItem[],
+  seenLinks: Set<string>,
+): ClassifiedItem[] {
+  if (seenLinks.size === 0) return items;
+  const result = items.filter(it => !seenLinks.has(normalizeUrl(it.link)));
+  const dropped = items.length - result.length;
+  if (dropped > 0) {
+    console.log(`[Dedup] dropAlreadySeen: dropped ${dropped} items already shipped in last ${SEEN_WINDOW_DAYS} days`);
+  }
+  return result;
+}
+
 export function urlDedupAndDropLow(items: ClassifiedItem[]): ClassifiedItem[] {
   const fresh = items.filter(it => it.event_recency !== 'stale_commentary');
   const dropStale = items.length - fresh.length;
@@ -268,7 +363,7 @@ export async function semanticDedup(
   config: VariantConfig,
   items: ClassifiedItem[],
 ): Promise<ClassifiedItem[]> {
-  if (items.length < 10) {
+  if (items.length < 4) {
     console.log(`[Dedup] Skipping semantic dedup (only ${items.length} items)`);
     return items;
   }
@@ -596,6 +691,25 @@ export function selectForDigest(classified: ClassifiedItem[]): SelectedDigestInp
     }
   }
 
+  // 5b. Thin-day gap notes for priority country buckets (Poland, Cyprus, Nepal).
+  //     If a country bucket survives selection with only one story, surface a
+  //     soft "quiet day" note so the digest acknowledges the thin coverage
+  //     instead of looking truncated. Compilation translates the note into
+  //     both languages; rendering shows it under the section header.
+  {
+    const thinDayLabels: Partial<Record<SectionKey, string>> = {
+      poland: 'Poland',
+      cyprus: 'Cyprus',
+      nepal: 'Nepal',
+    };
+    for (const [key, label] of Object.entries(thinDayLabels)) {
+      const k = key as SectionKey;
+      if (buckets[k].length === 1) {
+        gaps.push({ section: k, note: `Quiet news day in ${label} — only one major item today.` });
+      }
+    }
+  }
+
   // 6. Sudan priority within globalSouth: pull Sudan stories to front
   buckets.globalSouth.sort((a, b) => {
     const aSudan = (a.country_tags || []).includes('SD') ? 0 : 1;
@@ -665,6 +779,108 @@ export function selectForDigest(classified: ClassifiedItem[]): SelectedDigestInp
   }
 
   return { sections, dropped, gaps };
+}
+
+// ==============================================================================
+// Stage 4b: per-section dedup
+//
+// `semanticDedup` runs once over the full corpus (~100+ items). It is
+// inevitably conservative on edge cases (multiple outlets covering the same
+// match-up, vessel incident, ruling, election count). Once items are bucketed
+// into sections, we have small focused haystacks (3–6 items) where a tighter
+// Haiku call can catch the residual duplicates the global pass missed.
+// Runs every section in parallel; failures are non-fatal (return the bucket
+// unchanged so the digest still ships).
+// ==============================================================================
+
+export async function dedupSelectedSections(
+  env: Env,
+  config: VariantConfig,
+  selected: SelectedDigestInput,
+): Promise<SelectedDigestInput> {
+  const dedupedSections = await Promise.all(
+    selected.sections.map(async (section): Promise<SelectedDigestSection> => {
+      if (section.stories.length < 2) return section;
+      const stories = await dedupSectionStories(env, config, section);
+      return { ...section, stories };
+    }),
+  );
+  return { ...selected, sections: dedupedSections };
+}
+
+async function dedupSectionStories(
+  env: Env,
+  config: VariantConfig,
+  section: SelectedDigestSection,
+): Promise<ClassifiedItem[]> {
+  const items = section.stories;
+  const provider = resolveProvider(config, 'cheap');
+  let raw: string;
+  try {
+    const prompt = buildPerSectionDedupPrompt(section.header, items);
+    raw = await provider.call(env, 'cheap', prompt, 1500);
+  } catch (err) {
+    console.log(
+      `[Dedup] Per-section LLM call failed for ${section.key}: ${err instanceof Error ? err.message : err}`,
+    );
+    return items;
+  }
+
+  let groups: DedupGroup[] = [];
+  try {
+    let jsonStr = raw.trim();
+    const fence = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fence) jsonStr = fence[1].trim();
+    const start = jsonStr.indexOf('[');
+    const end = jsonStr.lastIndexOf(']');
+    if (start === -1) return items;
+    const slice = end > start ? jsonStr.slice(start, end + 1) : jsonStr.slice(start);
+    const parsed = JSON.parse(slice);
+    if (Array.isArray(parsed)) groups = parsed as DedupGroup[];
+  } catch (err) {
+    console.log(`[Dedup] Per-section parse failed for ${section.key}: ${err}`);
+    return items;
+  }
+
+  if (groups.length === 0) return items;
+
+  const toDrop = new Set<number>();
+  for (const group of groups) {
+    const primary = items[group.primary];
+    if (!primary) continue;
+    const sources: { name: string; link: string; angle?: string }[] = primary.all_sources
+      ? [...primary.all_sources]
+      : [{ name: primary.source, link: primary.link }];
+    for (const dupIdx of group.duplicates) {
+      if (dupIdx === group.primary) continue;
+      const dup = items[dupIdx];
+      if (!dup) continue;
+      toDrop.add(dupIdx);
+      if (!sources.some(s => s.name === dup.source)) {
+        sources.push({ name: dup.source, link: dup.link });
+      }
+      // Also fold in any sources the duplicate already aggregated.
+      if (dup.all_sources) {
+        for (const s of dup.all_sources) {
+          if (!sources.some(existing => existing.name === s.name)) sources.push(s);
+        }
+      }
+      if (dup.importance === 'high') primary.importance = 'high';
+    }
+    primary.all_sources = sources;
+    if (group.rationale?.toLowerCase().trim().startsWith('conflicting')) {
+      primary.conflicting = true;
+      primary.conflict_note = group.rationale.replace(/^conflicting\s*[—:-]?\s*/i, '');
+    }
+  }
+
+  const result = items.filter((_, i) => !toDrop.has(i));
+  if (result.length !== items.length) {
+    console.log(
+      `[Dedup] Per-section ${section.key}: ${items.length} → ${result.length} items (${groups.length} groups)`,
+    );
+  }
+  return result;
 }
 
 // Convert the selected digest back to a flat TriagedStory[] for KV storage

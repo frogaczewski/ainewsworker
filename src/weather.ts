@@ -31,10 +31,9 @@ async function fetchWeatherForLocation(location: { name: string; lat: number; lo
 
     return { location: location.name, days };
   } catch (err) {
-    return {
-      location: location.name,
-      days: [{ date: 'N/A', conditions: 'Weather data temporarily unavailable', tempMax: 0, tempMin: 0 }],
-    };
+    const reason = err instanceof Error ? err.message : String(err);
+    console.log(`[Weather] ${location.name} fetch failed: ${reason}`);
+    return { location: location.name, days: [] };
   } finally {
     clearTimeout(timer);
   }

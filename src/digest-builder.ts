@@ -127,6 +127,11 @@ const READ_FULL_COVERAGE: Record<Lang, (url: string) => string> = {
   pl: (url) => `[Czytaj pełne pokrycie →](${url})`,
 };
 
+const READ_MORE: Record<Lang, (url: string) => string> = {
+  en: (url) => `[Read more →](${url})`,
+  pl: (url) => `[Czytaj więcej →](${url})`,
+};
+
 // ──────────────────────────────────────────────────────────────────────────────
 // JSON schema for native tool-use (Anthropic) — the model emits a tool_use
 // block whose `input` is validated against this shape on the API server. No
@@ -183,6 +188,14 @@ export const DIGEST_JSON_SCHEMA = {
     },
     marketCommentary: BILINGUAL_TEXT_SCHEMA,
     macroWatch: BILINGUAL_TEXT_SCHEMA,
+    topThread: {
+      // Optional. Either a bilingual text object OR null when no single
+      // narrative dominates the day. Sonnet's tool-use schema requires us to
+      // accept both shapes — passing `null` for "no thread" keeps the field
+      // present and avoids the model hallucinating a thread to satisfy a
+      // required field.
+      anyOf: [BILINGUAL_TEXT_SCHEMA, { type: 'null' }],
+    },
   },
 } as const;
 
@@ -333,6 +346,7 @@ export function parseStructuredDigest(response: string): StructuredDigest {
     gaps: Array.isArray(parsed.gaps) ? parsed.gaps : [],
     marketCommentary: parsed.marketCommentary ?? { en: '', pl: '' },
     macroWatch: parsed.macroWatch ?? { en: '', pl: '' },
+    topThread: parsed.topThread ?? null,
   };
 }
 
@@ -357,10 +371,19 @@ function dayLabel(isoDate: string, lang: Lang): string {
   return englishDay;
 }
 
+const WEATHER_UNAVAILABLE: Record<Lang, (label: string) => string> = {
+  en: (label) => `*${label}: weather data unavailable.*`,
+  pl: (label) => `*${label}: brak danych pogodowych.*`,
+};
+
 function renderWeatherTable(weather: WeatherData[], lang: Lang): string {
   const blocks: string[] = [];
   for (const loc of weather) {
     const label = WEATHER_LOCATION_LABEL[loc.location]?.[lang] ?? loc.location;
+    if (loc.days.length === 0) {
+      blocks.push(`### ${label}\n\n${WEATHER_UNAVAILABLE[lang](label)}`);
+      continue;
+    }
     const rows = loc.days.slice(0, 3).map(d =>
       `| ${dayLabel(d.date, lang)} | ${d.conditions} | ${d.tempMax}°C / ${d.tempMin}°C |`
     ).join('\n');
@@ -368,6 +391,11 @@ function renderWeatherTable(weather: WeatherData[], lang: Lang): string {
   }
   return blocks.join('\n\n');
 }
+
+const MARKETS_STALE_NOTE: Record<Lang, (date: string) => string> = {
+  en: (date) => `*Live market data was unavailable; showing values from ${date}.*`,
+  pl: (date) => `*Brak danych rynkowych w czasie rzeczywistym; pokazujemy notowania z ${date}.*`,
+};
 
 function renderMarketsTable(markets: MarketData, lang: Lang): string {
   const rows: string[] = [];
@@ -380,7 +408,11 @@ function renderMarketsTable(markets: MarketData, lang: Lang): string {
     if (c.error || c.rate === null) continue;
     rows.push(`| ${c.pair} | ${c.rate.toFixed(4)} | — |`);
   }
-  return `${MARKET_TABLE_HEADER[lang]}\n${rows.join('\n')}`;
+  const table = `${MARKET_TABLE_HEADER[lang]}\n${rows.join('\n')}`;
+  if (markets.stale && markets.cachedFrom) {
+    return `${MARKETS_STALE_NOTE[lang](markets.cachedFrom)}\n\n${table}`;
+  }
+  return table;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -426,7 +458,10 @@ function renderSection(
   dateString: string,
 ): string {
   if (section.stories.length === 0) return '';
-  const useTldr = mode === 'briefing';
+  // Both full and briefing render `body` (2–4 sentences). `tldr` is retained on
+  // the structured payload for future short-form contexts (SMS/push) but is not
+  // used in email — readers reported one-sentence prose felt thin.
+  const useTldr = false;
   const lines: string[] = [`## ${SECTION_HEADERS[section.key][lang]}`, ''];
   const storyUrl = sectionStoryUrl(section, websiteUrl, dateString);
 
@@ -440,7 +475,7 @@ function renderSection(
       lines.push(renderStoryEditorial(story, lang, useTldr));
       lines.push('');
       if (mode === 'briefing') {
-        lines.push(`[Read more →](${storyUrl})`);
+        lines.push(READ_MORE[lang](storyUrl));
         lines.push('');
       }
     }
@@ -495,6 +530,17 @@ function gapNoteFor(
   return `*${pickLang(gap.note, lang)}*`;
 }
 
+// Render the optional one-line lead naming the day's dominant narrative.
+// Returns null when no thread was emitted or when both languages are empty
+// (defensive — the LLM occasionally returns `{ en: '', pl: '' }` instead of
+// null when uncertain).
+function topThreadLine(digest: StructuredDigest, lang: Lang): string | null {
+  if (!digest.topThread) return null;
+  const text = pickLang(digest.topThread, lang).trim();
+  if (!text) return null;
+  return `*${text}*`;
+}
+
 export function assembleFullDigest(
   digest: StructuredDigest,
   lang: Lang,
@@ -507,6 +553,11 @@ export function assembleFullDigest(
   parts.push('');
   parts.push(COMPILED_FROM[lang](sourcesNote(feedStats)));
   parts.push('');
+  const thread = topThreadLine(digest, lang);
+  if (thread) {
+    parts.push(thread);
+    parts.push('');
+  }
   parts.push('---');
 
   for (const section of digest.sections) {
@@ -563,6 +614,11 @@ export function assembleEmailBriefing(
   parts.push('');
   parts.push(COMPILED_FROM[lang](sourcesNote(feedStats)));
   parts.push('');
+  const thread = topThreadLine(digest, lang);
+  if (thread) {
+    parts.push(thread);
+    parts.push('');
+  }
   parts.push('---');
 
   for (const section of digest.sections) {

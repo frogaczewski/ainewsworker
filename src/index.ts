@@ -1,6 +1,6 @@
 import { fetchAllFeeds } from './feeds';
 import { fetchWeather } from './weather';
-import { fetchMarketData } from './markets';
+import { fetchMarketData, fetchMarketDataWithCache } from './markets';
 import {
   BASELINE_CONFIG,
   VARIANT_CONFIGS,
@@ -29,6 +29,10 @@ import {
   urlDedupAndDropLow,
   semanticDedup,
   selectForDigest,
+  dedupSelectedSections,
+  loadSeenLinks,
+  recordSeenLinks,
+  dropAlreadySeen,
   selectedToFlat,
 } from './classify';
 import {
@@ -136,7 +140,7 @@ async function runPhase1(env: Env, opts: Phase1Options = {}): Promise<Phase1Outp
     [feedResult, weather, markets] = await Promise.all([
       fetchAllFeeds(),
       fetchWeather(),
-      fetchMarketData(),
+      fetchMarketDataWithCache(env, runDate),
     ]);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -179,8 +183,12 @@ async function runPhase1(env: Env, opts: Phase1Options = {}): Promise<Phase1Outp
     throw new Error('Batched classification returned 0 items — every batch failed');
   }
 
-  // Stage 3a: URL dedup + drop low importance
-  const urlDeduped = urlDedupAndDropLow(classified);
+  // Stage 3a: URL dedup + drop low importance + drop items already shipped
+  // in the last 7 days (cross-day memory; prevents Nissan UK closure
+  // appearing in two consecutive days' digests).
+  const seenLinks = await loadSeenLinks(env, runDate);
+  const freshOnly = dropAlreadySeen(classified, seenLinks);
+  const urlDeduped = urlDedupAndDropLow(freshOnly);
 
   // Stage 3b: semantic dedup
   const fullyDeduped = await semanticDedup(env, BASELINE_CONFIG, urlDeduped);
@@ -199,7 +207,9 @@ async function runPhase1(env: Env, opts: Phase1Options = {}): Promise<Phase1Outp
   }
 
   // Stage 4: balance-aware selection (deterministic, no LLM)
-  const selectedInput = selectForDigest(fullyDeduped);
+  const initialSelection = selectForDigest(fullyDeduped);
+  // Stage 4b: per-section dedup (small Haiku call per section, in parallel)
+  const selectedInput = await dedupSelectedSections(env, BASELINE_CONFIG, initialSelection);
   console.log(
     `[Phase1] Selection: ${selectedInput.sections.length} sections, ` +
       `${selectedInput.sections.reduce((n, s) => n + s.stories.length, 0)} stories, ` +
@@ -452,6 +462,13 @@ async function runPhase2(env: Env, date: string, opts: Phase2Options = {}): Prom
     console.error(`[Phase2] Heartbeat write failed (non-fatal): ${err}`);
   }
 
+  // Record what we shipped so the next 7 days' pipelines drop these links
+  // before classification — prevents same-story repetition across days.
+  // Skipped in testMode so test runs don't pollute the production seen-list.
+  if (!opts.testMode) {
+    await recordSeenLinks(env, phase1.triagedStories, date);
+  }
+
   // External heartbeat: ping the uptime monitor if configured. If this ping
   // stops arriving, the monitor emails us — independent of Cloudflare being
   // up, so it catches account-level outages our own watchdog can't.
@@ -526,7 +543,8 @@ async function runVariantCore(
   }
   const urlDeduped = urlDedupAndDropLow(classified);
   const fullyDeduped = await semanticDedup(env, config, urlDeduped);
-  const selectedInput = selectForDigest(fullyDeduped);
+  const initialSelection = selectForDigest(fullyDeduped);
+  const selectedInput = await dedupSelectedSections(env, config, initialSelection);
   const triagedStories = selectedToFlat(selectedInput);
 
   // Carry imageUrl from RSS items (classification prompts don't request it).
@@ -752,6 +770,12 @@ const STRUCTURED_TOOL_NAME = 'emit_structured_output';
 // time so a stuck Anthropic batch doesn't perpetually defer.
 const STAGE_B_BUDGET_MS = 4 * 60 * 60 * 1000;
 
+// Hard cap on self-enqueued in_progress polls. Sonnet/Haiku batches normally
+// finish well under 50 polls — anything past 150 means the batch is wedged
+// (or our state record is stale) and we'd otherwise burn queue work forever.
+// Observed in 2026-05-10 logs: 90+ unique compile-poll attempts for one date.
+const MAX_POLL_ATTEMPTS = 150;
+
 // Adaptive re-poll delays for an in_progress Haiku batch. Picked as a
 // function of elapsed time since Stage A submission so we poll cheaply early
 // and tighten as the 4-hour budget approaches.
@@ -814,7 +838,7 @@ async function runStageA(env: Env, date: string, opts: { testMode?: boolean } = 
   const [feedResult, weather, markets] = await Promise.all([
     fetchAllFeeds(),
     fetchWeather(),
-    fetchMarketData(),
+    fetchMarketDataWithCache(env, date),
   ]);
 
   console.log(`[StageA] RSS: ${feedResult.items.length} items from ${feedResult.total - feedResult.failed}/${feedResult.total} feeds`);
@@ -933,6 +957,21 @@ async function pollClassifyOnce(env: Env, date: string, attempt: number, testMod
       `elapsedMin=${Math.round(elapsedMs / 60000)}`,
   );
 
+  // Shared cap covering canceling + in_progress branches below. The "ended"
+  // path is naturally bounded (success, partial-accept, or abort).
+  if (
+    (status.processing_status === 'canceling' || status.processing_status === 'in_progress') &&
+    attempt >= MAX_POLL_ATTEMPTS
+  ) {
+    const msg =
+      `[PollClassify] ABORTING — exceeded MAX_POLL_ATTEMPTS=${MAX_POLL_ATTEMPTS} ` +
+      `(date=${date}, batchId=${state.batchId}, status=${status.processing_status}, ` +
+      `elapsedMin=${Math.round(elapsedMs / 60000)}). Batch wedged; manual intervention required.`;
+    console.error(msg);
+    await sendErrorEmail(env, msg).catch(() => undefined);
+    return true;
+  }
+
   if (status.processing_status === 'canceling') {
     // Treat canceling as terminal-ish; fall through to next poll.
     await reEnqueuePollClassify(env, date, attempt, haikuRepollDelaySeconds(elapsedMs, testMode), testMode);
@@ -1034,10 +1073,15 @@ async function runStageBCompose(env: Env, date: string, state: ClassifyBatchStat
 
   carryImageUrls(allClassified, state.sortedItems);
 
-  // URL dedup → semantic dedup (sync Haiku, small) → balance-aware select.
-  const urlDeduped = urlDedupAndDropLow(allClassified);
+  // URL dedup → semantic dedup (sync Haiku, small) → balance-aware select →
+  // per-section dedup (parallel small Haiku calls). Plus drop links shipped
+  // in the last 7 days so the same story doesn't appear two days running.
+  const seenLinks = await loadSeenLinks(env, date);
+  const freshOnly = dropAlreadySeen(allClassified, seenLinks);
+  const urlDeduped = urlDedupAndDropLow(freshOnly);
   const fullyDeduped = await semanticDedup(env, BASELINE_CONFIG, urlDeduped);
-  const selectedInput = selectForDigest(fullyDeduped);
+  const initialSelection = selectForDigest(fullyDeduped);
+  const selectedInput = await dedupSelectedSections(env, BASELINE_CONFIG, initialSelection);
   console.log(
     `[StageB] Selection: ${selectedInput.sections.length} sections, ` +
       `${selectedInput.sections.reduce((n, s) => n + s.stories.length, 0)} stories`,
@@ -1153,6 +1197,15 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
   );
 
   if (status.processing_status === 'in_progress' || status.processing_status === 'canceling') {
+    if (attempt >= MAX_POLL_ATTEMPTS) {
+      const msg =
+        `[PollCompile] ABORTING — exceeded MAX_POLL_ATTEMPTS=${MAX_POLL_ATTEMPTS} ` +
+        `(date=${date}, batchId=${state.batchId}, status=${status.processing_status}, ` +
+        `elapsedMin=${Math.round(elapsedMs / 60000)}). Batch wedged; manual intervention required.`;
+      console.error(msg);
+      await sendErrorEmail(env, msg).catch(() => undefined);
+      return true;
+    }
     await env.DIGEST_QUEUE.send(
       { kind: 'poll-compile', date, attempt: attempt + 1, testMode: testMode || undefined },
       { delaySeconds: sonnetRepollDelaySeconds(elapsedMs, testMode) },
@@ -1239,6 +1292,33 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
       );
     });
   }
+
+  // Salvage gave up: sections came back as a string (or other non-array) that
+  // no repair pass could recover. Handing this to assembleAll would crash with
+  // a confusing "Cannot read properties of undefined" because for…of on a
+  // string iterates characters. Treat as a logical failure with the same
+  // severity as max_tokens — resubmit once, then abort.
+  if (!Array.isArray(structured.sections)) {
+    const sectionsType = typeof structured.sections;
+    const sectionsPreview = sectionsType === 'string'
+      ? ` len=${(structured.sections as unknown as string).length}`
+      : '';
+    if (state.retryCount >= 1) {
+      const msg =
+        `[PollCompile] ABORTING — Sonnet compile returned non-array sections twice ` +
+        `(date=${date}, batchId=${state.batchId}, sectionsType=${sectionsType}${sectionsPreview}). ` +
+        `Salvage passes failed; manual intervention required.`;
+      console.error(msg);
+      await sendErrorEmail(env, msg).catch(() => undefined);
+      return true;
+    }
+    console.warn(
+      `[PollCompile] sections not array (type=${sectionsType}${sectionsPreview}), resubmitting once`,
+    );
+    await resubmitCompileBatch(env, date, state, testMode);
+    return false;
+  }
+
   await runStageCSendDigest(env, date, structured, !!testMode);
   return true;
 }
@@ -1463,6 +1543,13 @@ async function runStageCSendDigest(
   } catch (err) {
     console.error(`[StageC] Heartbeat write failed (non-fatal): ${err}`);
   }
+
+  // Record shipped links so subsequent runs in the rolling 7-day window
+  // drop them before classification. Skipped under testMode.
+  if (!testMode) {
+    await recordSeenLinks(env, phase1.triagedStories, date);
+  }
+
   await pingExternalHeartbeat(env);
   console.log(`[StageC] Complete for ${date}`);
 }
@@ -1919,6 +2006,32 @@ async function runWatchdog(env: Env, today: string): Promise<void> {
 // consumer is the same handler, switched on `batch.queue`.
 // ──────────────────────────────────────────────────────────────────────────────
 
+// Send an error email at most once per (kind, date). Stage-C failures used to
+// re-fire every time the 03:00 UTC cron re-enqueued a doomed poll, spamming
+// the inbox with the same message. A 24h KV flag keeps the first alarm and
+// suppresses duplicates until the next day rolls over.
+const QUEUE_ERROR_EMAIL_TTL_SECONDS = 86_400;
+async function maybeSendQueueErrorEmail(
+  env: Env,
+  kind: 'poll-classify' | 'poll-compile',
+  date: string,
+  errMsg: string,
+): Promise<void> {
+  const flagKey = `errorEmail:${kind}:${date}`;
+  try {
+    const already = await env.DIGEST_KV.get(flagKey);
+    if (already) {
+      console.log(`[Queue] suppressing duplicate error email for ${kind} ${date}`);
+      return;
+    }
+    await env.DIGEST_KV.put(flagKey, '1', { expirationTtl: QUEUE_ERROR_EMAIL_TTL_SECONDS });
+  } catch (err) {
+    console.warn(`[Queue] dedupe flag read/write failed (${kind} ${date}): ${err}`);
+    // Fall through and send anyway — better to over-notify than miss the signal.
+  }
+  await sendErrorEmail(env, `[${kind}] ${date}: ${errMsg}`).catch(() => undefined);
+}
+
 async function handleQueue(batch: MessageBatch<QueueMessage>, env: Env): Promise<void> {
   if (batch.queue === 'ainewsworker-digest-dlq') {
     for (const msg of batch.messages) {
@@ -1969,7 +2082,7 @@ async function handleQueue(batch: MessageBatch<QueueMessage>, env: Env): Promise
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
           console.error(`[Queue] poll-classify threw for ${body.date}: ${errMsg}`);
-          await sendErrorEmail(env, `[poll-classify] ${body.date}: ${errMsg}`).catch(() => undefined);
+          await maybeSendQueueErrorEmail(env, 'poll-classify', body.date, errMsg);
         }
         msg.ack();
       } else if (body.kind === 'poll-compile') {
@@ -1979,7 +2092,7 @@ async function handleQueue(batch: MessageBatch<QueueMessage>, env: Env): Promise
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
           console.error(`[Queue] poll-compile threw for ${body.date}: ${errMsg}`);
-          await sendErrorEmail(env, `[poll-compile] ${body.date}: ${errMsg}`).catch(() => undefined);
+          await maybeSendQueueErrorEmail(env, 'poll-compile', body.date, errMsg);
         }
         msg.ack();
       } else if (body.kind === 'resend') {
