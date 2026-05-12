@@ -22,7 +22,7 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   // Middle East & Gulf
   { name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', category: 'global' },
   { name: 'Middle East Eye', url: 'https://www.middleeasteye.net/rss', category: 'global' },
-  { name: 'Khaleej Times', url: 'https://www.khaleejtimes.com/rss', category: 'global' },
+  // Khaleej Times — RSS endpoint (https://www.khaleejtimes.com/rss) returns 404 as of 2026-05; no documented replacement.
   { name: 'Jerusalem Post', url: 'https://www.jpost.com/rss/rssfeedsfrontpage.aspx', category: 'global' },
 
   // Iran
@@ -77,8 +77,8 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   // Latin America
   { name: 'MercoPress', url: 'https://en.mercopress.com/rss', category: 'global' },
   { name: 'Tico Times', url: 'https://ticotimes.net/feed', category: 'global' },
-  { name: 'Infobae', url: 'https://www.infobae.com/feeds/rss/', category: 'global' },
-  { name: 'O Globo', url: 'https://oglobo.globo.com/rss/oglobo.xml', category: 'global' },
+  // Infobae — public RSS (https://www.infobae.com/feeds/rss/) 404s as of 2026-05; bot-blocked.
+  { name: 'G1 (Globo)', url: 'https://g1.globo.com/rss/g1/', category: 'global' },
   { name: 'CIPER Chile', url: 'https://www.ciperchile.cl/feed/', category: 'global', editorial: true },
   { name: 'El País América', url: 'https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/america/portada', category: 'global' },
 
@@ -140,10 +140,10 @@ export const RSS_FEEDS: RssFeedConfig[] = [
   { name: 'BBC Culture', url: 'https://www.bbc.com/culture/feed.rss', category: 'culture' },
   { name: 'The Guardian Culture', url: 'https://www.theguardian.com/culture/rss', category: 'culture' },
   { name: 'Artnet News', url: 'https://news.artnet.com/feed', category: 'culture' },
-  { name: 'Culture.pl', url: 'https://culture.pl/en/rss.xml', category: 'culture' },
+  // Culture.pl — https://culture.pl/en/rss.xml 403s under any UA we've tried; site has dropped public RSS.
 
   // Economics & Macro
-  { name: 'Reuters Business', url: 'https://www.reutersagency.com/feed/?best-topics=business-finance', category: 'economics' },
+  // Reuters Business — reutersagency.com feed retired; www.reuters.com/business/rss requires auth.
   { name: 'ECB Press', url: 'https://www.ecb.europa.eu/rss/press.html', category: 'economics' },
   { name: 'Fed News', url: 'https://www.federalreserve.gov/feeds/press_all.xml', category: 'economics' },
   { name: 'IMF News', url: 'https://www.imf.org/en/News/Rss', category: 'economics' },
@@ -212,10 +212,10 @@ export const INTERESTS: Record<string, InterestDefinition> = {
 - Routine weekly race previews with no new angle
 - Generic training-tip or nutrition explainers`,
     feeds: [
-      { name: 'Cyclingnews', url: 'https://www.cyclingnews.com/rss/news', category: 'cycling' },
+      { name: 'Cyclingnews', url: 'https://www.cyclingnews.com/feeds.xml', category: 'cycling' },
       { name: 'VeloNews', url: 'https://velo.outsideonline.com/feed/', category: 'cycling' },
-      { name: 'road.cc', url: 'https://road.cc/rss.xml', category: 'cycling' },
-      { name: 'BikeRadar', url: 'https://www.bikeradar.com/feeds/news', category: 'cycling' },
+      { name: 'road.cc', url: 'https://road.cc/feed', category: 'cycling' },
+      // BikeRadar — https://www.bikeradar.com/feeds/news returns 406 under any UA we've tried as of 2026-05.
     ],
     topN: 3,
   },

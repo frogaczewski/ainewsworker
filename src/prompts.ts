@@ -382,12 +382,18 @@ export function buildSemanticDedupPrompt(items: ClassifiedItem[]): string {
 
   return `You are finding duplicate news stories. Each line below is ONE news item: [idx] source — "headline" — country_tags — pubDate.
 
-Group items that describe the SAME real-world event. Two items are duplicates when they report on the same specific event, even if they emphasise different aspects (e.g., "civilian toll" and "diplomatic response" to the same strike are duplicates; they cover the same event from different angles).
+Your job is to group items that describe the SAME real-world event. Be AGGRESSIVE about grouping — readers see same-event duplicates as the most jarring quality issue. When in doubt, group rather than split.
+
+DUPLICATES (group these together):
+- Same specific event covered by multiple outlets, even when each headline emphasises a different aspect (a strike's "civilian toll" and the same strike's "diplomatic response" are one event).
+- Multiple items sharing the same proper noun anchor — a person's name in a news-making action ("Mélenchon launches bid", "Mélenchon announces 4th run"), a vessel/site name ("MV Hondius outbreak"), a match-up ("Arsenal vs Atlético", "PSG vs Bayern"), a named operation ("Operation Sindoor"), a court ruling/decision, a verdict, an election result ("Tamil Nadu results", "Bengal vote count"). Three or more items mentioning the same anchor on the same day are almost always the same event.
+- Two outlets reporting the same statement, ruling, vote, attack, market move, or announcement — even if framing diverges.
+- Live-blog updates on the same incident ("Hezbollah strikes vehicles", "Hezbollah claims 17 attacks") published within the same 24-hour window.
 
 NOT duplicates:
-- Two separate events involving the same actor (two different Trump announcements on the same day)
-- Same general topic but different specific events (two unrelated climate protests)
-- Multi-day coverage of an ongoing situation — treat different days as separate events unless the headline is clearly about the SAME news moment
+- Two genuinely separate events involving the same actor on the same day (e.g. one Trump tariff announcement AND one Trump phone call — distinct news moments).
+- Same general topic but different specific events (two unrelated climate protests in different cities).
+- Different sub-events within an ongoing story when the headlines explicitly point at distinct moments (e.g. "WHO confirms 7 cases" vs "Spain agrees to dock ship" — these are sequential developments, but if you can fit them under one umbrella entry with a multi-source citation, prefer to group).
 
 Output format — return ONLY a JSON array:
 [
@@ -398,9 +404,48 @@ Output format — return ONLY a JSON array:
 - "primary" is the idx of the most authoritative/original entry (prefer major agencies: Reuters, BBC, Bloomberg; or the source closest to the story — e.g. Al Jazeera for Middle East, Kathmandu Post for Nepal).
 - "duplicates" lists the OTHER idxs that cover the same event. Do NOT include the primary's own idx.
 - Only emit groups with at least one duplicate. Items not in any group are implicit singletons — do not list them.
-- If multiple sources cover the same event from clearly contradictory angles (e.g. Western outlet vs Russian state media with different framings), still put them in the same group — add "conflicting" before the rationale, like: "conflicting — BBC reports casualties, TASS denies them"
+- If multiple sources cover the same event from clearly contradictory angles (e.g. Western outlet vs Russian state media with different framings), still put them in the same group — add "conflicting" before the rationale, like: "conflicting — BBC reports casualties, TASS denies them".
 
 Return ONLY the JSON array, no markdown fences, no commentary.
+
+=== ITEMS ===
+${itemsText}`;
+}
+
+/**
+ * Stage 3c: per-section semantic dedup. Runs after selectForDigest has
+ * bucketed items, with a tighter prompt scoped to one section's topical
+ * context. The bucket is small (≤6 items typically) so the model can be
+ * very precise. Catches within-section duplicates that the global pass
+ * missed — Mélenchon ×3 in Europa, Hantawirus ×4 in Health, Arsenal ×5
+ * in Sports, etc.
+ *
+ * Input: minimal tuples — the section header gives the model topical context.
+ */
+export function buildPerSectionDedupPrompt(sectionHeader: string, items: ClassifiedItem[]): string {
+  const itemsText = items.map((item, i) =>
+    `[${i}] ${item.source} — "${item.headline}" — tags: ${(item.country_tags || []).join(',')} — ${item.pubDate}`
+  ).join('\n');
+
+  return `You are reviewing items already grouped into the "${sectionHeader}" section of today's digest. Find any items that describe the SAME real-world event — readers find within-section duplicates the most jarring quality issue, so be aggressive about grouping.
+
+Two items are duplicates when they cover the same:
+- Specific named event (one match-up, one announcement, one ruling, one strike, one outbreak, one election count, one death, one result).
+- Anchor noun appearing in 2+ headlines on the same day (a person doing something news-making, a vessel/site, a competition fixture, an operation name, a verdict). Three or more items mentioning the same anchor on the same day are almost always the same event.
+- Live-blog updates of the same incident published in the same 24-hour window.
+
+NOT duplicates: genuinely separate events that happen to share a topic or actor (e.g. two unrelated climate protests; two different Trump statements; two different scientific papers in the same field).
+
+Output format — return ONLY a JSON array of groups (only emit groups that have at least one duplicate; do not list singletons):
+[
+  {"primary": 0, "duplicates": [2, 3], "rationale": "all about the same Arsenal–Atlético semi-final"}
+]
+
+- "primary" is the most authoritative outlet in the group (prefer wires: Reuters, BBC, AP, Bloomberg, AFP; otherwise the outlet closest to the story's geography).
+- "duplicates" lists the OTHER idxs only — never include the primary.
+- If clearly contradictory framings (Western vs state media), still group; prefix the rationale with "conflicting".
+
+Return ONLY the JSON array — no markdown fences, no commentary.
 
 === ITEMS ===
 ${itemsText}`;
@@ -437,7 +482,7 @@ export function buildStructuredCompilationPrompt(
 
 ## OUTPUT
 
-You will be invoked as the \`emit_structured_output\` tool. The shape of its \`input\` is fixed by a JSON schema (sections, gaps, marketCommentary, macroWatch — each story has \`link\`, \`headline\`, \`body\`, \`tldr\` with \`en\` and \`pl\` fields). Mirror \`input.sections[].key\` and \`input.sections[].format\` from the data block below; only emit gaps that appear in \`input.gaps\`.
+You will be invoked as the \`emit_structured_output\` tool. The shape of its \`input\` is fixed by a JSON schema (sections, gaps, marketCommentary, macroWatch, topThread — each story has \`link\`, \`headline\`, \`body\`, \`tldr\` with \`en\` and \`pl\` fields). Mirror \`input.sections[].key\` and \`input.sections[].format\` from the data block below; only emit gaps that appear in \`input.gaps\`. \`topThread\` is optional — emit a bilingual one-liner only when one narrative dominates the day, otherwise pass \`null\` (see TOP THREAD below).
 
 ## PER-FORMAT LENGTH RULES
 
@@ -488,9 +533,31 @@ The audience is Polish/European. Convert non-metric and South-Asian units before
 - **Currency**: leave native currency, add USD or EUR equivalent in parentheses for less-familiar currencies (INR, PKR, PHP, NGN, IDR, BDT, LKR, EGP, KES, ZAR, ARS, BRL, MXN, VND...). Example: "500,000 rupees (~$6,000)". Do NOT convert USD, EUR, GBP, PLN.
 - **English written form**: "36 million", "500,000", "2.5 billion". **Polish written form**: "36 mln", "500 000", "2,5 mld".
 
+## TOP THREAD (optional)
+
+\`topThread\` surfaces the day's dominant narrative when one event clearly threads through multiple sections — e.g. a Strait of Hormuz crisis showing up in Politics, Business, Climate, and Markets at once. When this is true the reader otherwise feels they are "reading the same news three times"; the top thread tells them up front "yes, this is one story, here are the angles".
+
+**Emit a topThread (one short sentence) when:** at least 3 distinct stories across at least 2 prose sections in \`input.sections\` clearly relate to the same overarching event/crisis/announcement. Examples that would qualify:
+- "Strait of Hormuz crisis" with stories in politics, business, and climate
+- "Tamil Nadu election results" with stories in BRICS, politics, and culture
+- "Ukraine peace talks breakthrough" with stories in politics, Europe, and macro
+
+**Format:** ONE sentence (≤25 words EN; equivalent in PL). Name the narrative, then list the sections it touches using their localised names. Examples:
+- en: "Today's main thread: the Strait of Hormuz crisis runs through Global Politics, Business, and Markets."
+- pl: "Główny wątek dnia: kryzys w Cieśninie Ormuz przewija się przez Politykę Światową, Biznes i Rynki."
+
+**Set topThread to null when:**
+- No single narrative dominates (the digest is naturally varied today).
+- Only one section clusters around an event (it's section-local, not a thread).
+- You'd be stretching to find a unifying frame — better to emit null than invent one.
+
+Do NOT mention sources or links in the top thread; it's a reader-orientation cue, not a story.
+
 ## MARKETS / MACRO PROSE
 
-- \`marketCommentary\`: 1-2 sentences explaining what drove markets today, using the market data provided.
+- \`marketCommentary\`: 1-2 sentences explaining what drove markets today, using the market data provided. **Special cases:**
+  - If \`markets.stale\` is true, the values are from \`markets.cachedFrom\` (an earlier trading day) — frame the commentary in past tense for that date ("On {cachedFrom} markets…") and note that today's data was unavailable.
+  - If \`markets.quotes\` and \`markets.currencies\` are both empty (live fetch failed and no cache), write one sentence acknowledging the outage — e.g. "Live market data was unavailable at publication time." Do NOT invent prices or improvise commentary about an "energy data feed".
 - \`macroWatch\`: 3-5 sentences on the most significant macroeconomic developments — CPI/PPI prints, central bank decisions, GDP/employment/trade data, IMF/World Bank forecasts, tariffs/sanctions. If none today, briefly note what's coming up this week. Always cite sources as markdown links.
 
 Both fields in EN and PL using the same translation rules as above.

@@ -311,6 +311,11 @@ export interface CurrencyRate {
 export interface MarketData {
   quotes: MarketQuote[];
   currencies: CurrencyRate[];
+  // Set when today's fetch failed and we served the previous trading day's
+  // values from KV. `cachedFrom` is an ISO date (YYYY-MM-DD) of the cached
+  // snapshot; consumers (digest-builder) annotate the rendered table.
+  stale?: boolean;
+  cachedFrom?: string;
 }
 
 export interface PipelineResult {
@@ -393,4 +398,9 @@ export interface StructuredDigest {
   // Markets/macro prose. Tables are code-assembled from MarketData.
   marketCommentary: BilingualText;
   macroWatch: BilingualText;
+  // Optional one-line lead naming the day's dominant narrative when 3+ items
+  // across 2+ sections clearly relate to the same overarching event (e.g.
+  // "Strait of Hormuz crisis"). Rendered above the section list when set;
+  // omitted/null when no single thread dominates the day.
+  topThread?: BilingualText | null;
 }
