@@ -373,21 +373,39 @@ ${itemsText}`;
  * One Haiku call sees every surviving item at once and returns groups of items
  * that describe the same event.
  *
- * Input: minimal tuples — summaries are NOT included to keep the payload small.
+ * Input: headline + short summary (truncated to ~160 chars) per item. Summaries
+ * are included because headline-only dedup was missing obvious same-event
+ * duplicates (e.g., Brandon Clarke death story landing 3x, Starmer survival 2x).
  */
 export function buildSemanticDedupPrompt(items: ClassifiedItem[]): string {
-  const itemsText = items.map((item, i) =>
-    `[${i}] ${item.source} — "${item.headline}" — tags: ${(item.country_tags || []).join(',')} — ${item.pubDate}`
-  ).join('\n');
+  const truncate = (s: string, n: number) => {
+    if (!s) return '';
+    const flat = s.replace(/\s+/g, ' ').trim();
+    return flat.length > n ? flat.slice(0, n - 1) + '…' : flat;
+  };
+  const itemsText = items.map((item, i) => {
+    const summary = truncate(item.summary || '', 160);
+    const summaryPart = summary ? ` — summary: "${summary}"` : '';
+    return `[${i}] ${item.source} — "${item.headline}"${summaryPart} — tags: ${(item.country_tags || []).join(',')} — ${item.pubDate}`;
+  }).join('\n');
 
-  return `You are finding duplicate news stories. Each line below is ONE news item: [idx] source — "headline" — country_tags — pubDate.
+  return `You are finding duplicate news stories. Each line below is ONE news item: [idx] source — "headline" — summary — country_tags — pubDate.
 
 Group items that describe the SAME real-world event. Two items are duplicates when they report on the same specific event, even if they emphasise different aspects (e.g., "civilian toll" and "diplomatic response" to the same strike are duplicates; they cover the same event from different angles).
 
+Be GENEROUS in grouping — over-merging the same event is far less costly than letting the same news appear three times in the final digest. Use the summary text to confirm two headlines refer to the same underlying event even when the wording differs (e.g., "Starmer survives revolt" and "Streeting drops leadership challenge against Starmer" describe the same Labour Party event; "NBA mourns Brandon Clarke (29)" and "Memphis Grizzlies forward Brandon Clarke dies" describe the same death; "Sejm committee approves 15 KRS candidates" and "Łukasz Piebiak on KRS shortlist" describe the same committee vote).
+
+Treat as DUPLICATES (group them):
+- Same person's death / illness / retirement reported by multiple outlets
+- Same court ruling, vote, resignation, leadership challenge, or other discrete political event
+- Same match result, same trade, same earnings release, same scientific paper
+- Two items from the SAME source that cover the same event from slightly different angles
+- An "X happens" headline and a follow-up "Y reacts to X" or "World mourns X" headline when both centre on the same event
+
 NOT duplicates:
 - Two separate events involving the same actor (two different Trump announcements on the same day)
-- Same general topic but different specific events (two unrelated climate protests)
-- Multi-day coverage of an ongoing situation — treat different days as separate events unless the headline is clearly about the SAME news moment
+- Same general topic but different specific events (two unrelated climate protests, two different EU summit decisions)
+- Multi-day coverage of an ongoing situation — treat different days as separate events unless the headline+summary is clearly about the SAME news moment
 
 Output format — return ONLY a JSON array:
 [
@@ -428,12 +446,18 @@ export function buildStructuredCompilationPrompt(
 
   return `You are writing a daily news digest for Filip in Pegeia, Cyprus (ties to Poland; follows technology, climate, science, global politics, business). Output is consumed by code that assembles English and Polish markdown digests + email briefings — so you produce STRUCTURED JSON, not markdown.
 
-**Stories have ALREADY been selected, sectioned, and deduplicated upstream. Do NOT:**
-- re-select stories (use every story provided)
+**Stories have ALREADY been selected, sectioned, and (mostly) deduplicated upstream. Do NOT:**
+- re-select stories
 - move stories between sections
-- drop stories
 - add stories from elsewhere
 - mention the same event in two different sections
+
+**EXCEPTION — last-line dedup within a section.** Upstream Haiku dedup occasionally misses obvious duplicates. If you see two or more stories WITHIN THE SAME SECTION that clearly describe the SAME real-world event (same person's death, same court ruling, same vote, same resignation/leadership challenge, same match result, same earnings release, same scientific paper), merge them into ONE output entry:
+- Pick the most authoritative source as primary (Reuters, BBC, AP, Bloomberg, Guardian, FT, or the outlet closest to the story).
+- Emit exactly one output entry under the PRIMARY's \`link\`. Do NOT emit a separate entry for the duplicates.
+- Fold the other outlets into multi-source attribution in the body — name them and link them (see CITATIONS below).
+- Be CONSERVATIVE: only merge when the underlying event is unambiguously identical. Two separate announcements by the same person on the same day are NOT duplicates. Multi-day coverage of an ongoing situation is NOT a duplicate unless both items describe the same news moment.
+- Cross-section merging is still forbidden — a culture-section duplicate stays in culture, a sports-section duplicate stays in sports.
 
 ## OUTPUT
 
@@ -501,7 +525,7 @@ If \`input.gaps\` lists a note for a section, emit a corresponding entry under "
 
 ## CONTENT RULES
 
-- Every story in \`input.sections\` must produce exactly one entry in the output (matched by \`link\`).
+- Each story in \`input.sections\` should produce AT MOST one entry in the output (matched by \`link\`). The DEFAULT is one-to-one. The ONLY exception is the within-section dedup rule above: when you merge clear duplicates, emit only the primary's entry and skip the duplicates' \`link\`s entirely. Do NOT drop stories for any other reason.
 - Section order in output must match \`input.sections\` order (already in publication order).
 - Do NOT use markdown blockquote syntax (\`>\`) anywhere inside any field — it does not render in email.
 - Apostrophes, em-dashes, accented characters (\`ą\`, \`ł\`, \`ś\`, \`ć\`, etc.) and emoji should appear as literal UTF-8 in your output.
