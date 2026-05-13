@@ -127,6 +127,11 @@ const READ_FULL_COVERAGE: Record<Lang, (url: string) => string> = {
   pl: (url) => `[Czytaj pełne pokrycie →](${url})`,
 };
 
+const READ_MORE: Record<Lang, (url: string) => string> = {
+  en: (url) => `[Read more →](${url})`,
+  pl: (url) => `[Przeczytaj więcej →](${url})`,
+};
+
 // ──────────────────────────────────────────────────────────────────────────────
 // JSON schema for native tool-use (Anthropic) — the model emits a tool_use
 // block whose `input` is validated against this shape on the API server. No
@@ -439,10 +444,10 @@ function renderSection(
     for (const story of section.stories) {
       lines.push(renderStoryEditorial(story, lang, useTldr));
       lines.push('');
-      if (mode === 'briefing') {
-        lines.push(`[Read more →](${storyUrl})`);
-        lines.push('');
-      }
+    }
+    if (mode === 'briefing') {
+      lines.push(READ_MORE[lang](storyUrl));
+      lines.push('');
     }
   } else {
     // prose
