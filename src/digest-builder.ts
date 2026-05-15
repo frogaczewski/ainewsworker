@@ -242,6 +242,20 @@ export function repairJsonDrift(json: string): string {
     '„$1”"',
   );
 
+  // 5. Polish open + straight close + `:` + lowercase prose continuation.
+  //    The `:` is a legal post-string JSON token (object key separator), so
+  //    escapeStrayQuotes can't tell this apart from a real key-value boundary
+  //    using peek alone. The lowercase Polish letter following gives it away:
+  //    JSON values start with `"`, digit, `{`, `[`, `t/f/n` — never a Polish
+  //    lowercase letter, so a `: <lowercase>` pair after a Polish-open string
+  //    is unambiguously mid-prose.
+  //    Observed on 2026-05-15 batch msgbatch_01V37aL3uR66N5LBbzkCrGtp at
+  //    position 55394 (`"pl": "„Zupełnie nie ma paliwa": na Kubie ..."`).
+  out = out.replace(
+    /„([^"]{1,500})"(\s*:\s*)([a-ząćęłńóśźż])/g,
+    '„$1”$2$3',
+  );
+
   return out;
 }
 
@@ -253,12 +267,20 @@ export function repairJsonDrift(json: string): string {
 // with `\"`. Catches drift the regex rules can't (no Polish curly-quote
 // neighbour to anchor on).
 //
+// Polish-curly-open counter: while we've seen `„` (U+201E) inside the current
+// string with no matching `”` (U+201D) since, a stray straight `"` followed
+// by `:` is the broken Polish close — not a JSON key separator. Without this
+// guard the peek heuristic incorrectly closes the string at `paliwa":`,
+// breaking the parser two characters in (observed 2026-05-15 batch
+// msgbatch_01V37aL3uR66N5LBbzkCrGtp, position 55394).
+//
 // Verified on 2026-04-27 batch msgbatch_01WT3YRtcGqpWVG8QS8DyMfo (180 KB
 // input, 28 stray quotes rewritten, JSON parsed cleanly into 18 sections).
 export function escapeStrayQuotes(text: string): string {
   let out = '';
   let i = 0;
   let inString = false;
+  let polishOpen = 0;
   while (i < text.length) {
     const c = text[i];
     if (inString && c === '\\' && i + 1 < text.length) {
@@ -267,9 +289,22 @@ export function escapeStrayQuotes(text: string): string {
       i += 2;
       continue;
     }
+    if (inString && c === '„') {
+      polishOpen++;
+      out += c;
+      i++;
+      continue;
+    }
+    if (inString && c === '”') {
+      if (polishOpen > 0) polishOpen--;
+      out += c;
+      i++;
+      continue;
+    }
     if (c === '"') {
       if (!inString) {
         inString = true;
+        polishOpen = 0;
         out += c;
         i++;
         continue;
@@ -278,7 +313,12 @@ export function escapeStrayQuotes(text: string): string {
       let j = i + 1;
       while (j < text.length && (text[j] === ' ' || text[j] === '\t' || text[j] === '\n' || text[j] === '\r')) j++;
       const next = text[j] ?? '';
-      if (next === ',' || next === ':' || next === ']' || next === '}' || next === '') {
+      const looksLikeClose = next === ',' || next === ':' || next === ']' || next === '}' || next === '';
+      // Override only when peek is `:` AND there's an unmatched „ — that's
+      // the "Polish quote mistaken for JSON key separator" case. Other
+      // legal-close peeks (`,` `]` `}` end) still close normally, so
+      // unmatched-„ strings that just end with a real JSON close stay safe.
+      if (looksLikeClose && !(next === ':' && polishOpen > 0)) {
         inString = false;
         out += c;
         i++;
@@ -286,6 +326,7 @@ export function escapeStrayQuotes(text: string): string {
         // Stray quote mid-prose — escape it and stay in the string.
         out += '\\"';
         i++;
+        if (polishOpen > 0) polishOpen--;
       }
     } else {
       out += c;
