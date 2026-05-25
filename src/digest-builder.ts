@@ -286,7 +286,24 @@ export function escapeStrayQuotes(text: string): string {
       let j = i + 1;
       while (j < text.length && (text[j] === ' ' || text[j] === '\t' || text[j] === '\n' || text[j] === '\r')) j++;
       const next = text[j] ?? '';
-      if (next === ',' || next === ':' || next === ']' || next === '}' || next === '') {
+      let legitClose = next === ':' || next === ']' || next === '}' || next === '';
+      if (next === ',') {
+        // A bare `,` isn't enough — the model emits prose like
+        // `„patologią", „anomalią”` where the comma is sentence punctuation,
+        // not a JSON separator. Confirm by peeking what follows: a real JSON
+        // separator must be followed by another key (`"`) or value start
+        // (`{ [ - digit n t f`). If it's anything else (e.g. `„`, a letter),
+        // the `,` was prose.
+        let k = j + 1;
+        while (k < text.length && (text[k] === ' ' || text[k] === '\t' || text[k] === '\n' || text[k] === '\r')) k++;
+        const afterComma = text[k] ?? '';
+        legitClose =
+          afterComma === '"' || afterComma === '{' || afterComma === '[' ||
+          afterComma === '-' || (afterComma >= '0' && afterComma <= '9') ||
+          afterComma === 'n' || afterComma === 't' || afterComma === 'f' ||
+          afterComma === '';
+      }
+      if (legitClose) {
         inString = false;
         out += c;
         i++;
