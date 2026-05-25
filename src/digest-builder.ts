@@ -450,8 +450,20 @@ function renderMarketsTable(markets: MarketData, lang: Lang): string {
 // Story rendering
 // ──────────────────────────────────────────────────────────────────────────────
 
-function pickLang<T extends BilingualText>(text: T, lang: Lang): string {
-  return lang === 'pl' ? text.pl : text.en;
+function pickLang(text: BilingualText | string | undefined | null, lang: Lang): string {
+  // Tolerant fallback: Sonnet occasionally regresses and emits a single
+  // string instead of the required {en, pl} bilingual object — observed
+  // 2026-05-25 batch msgbatch_01YPFEuVn9bC55aWW6Ye1YsL where every story
+  // had `headline` as a plain English string, leaving the PL digest with
+  // literal "undefined" titles. Reuse the string for both languages so
+  // the digest renders something readable; fix the prompt as well so the
+  // next run gets the right shape.
+  if (text == null) return '';
+  if (typeof text === 'string') return text;
+  const en = typeof text.en === 'string' ? text.en : '';
+  const pl = typeof text.pl === 'string' ? text.pl : '';
+  if (lang === 'pl') return pl || en;
+  return en || pl;
 }
 
 function renderStoryProse(story: StructuredStory, lang: Lang, useTldr: boolean): string {

@@ -461,24 +461,26 @@ export function buildStructuredCompilationPrompt(
 
 ## OUTPUT
 
-You will be invoked as the \`emit_structured_output\` tool. The shape of its \`input\` is fixed by a JSON schema (sections, gaps, marketCommentary, macroWatch — each story has \`link\`, \`headline\`, \`body\`, \`tldr\` with \`en\` and \`pl\` fields). Mirror \`input.sections[].key\` and \`input.sections[].format\` from the data block below; only emit gaps that appear in \`input.gaps\`.
+You will be invoked as the \`emit_structured_output\` tool. The shape of its \`input\` is fixed by a JSON schema (sections, gaps, marketCommentary, macroWatch — each story has \`link\` plus \`headline\`, \`body\`, \`tldr\` which are ALL bilingual objects with \`en\` and \`pl\` fields). Mirror \`input.sections[].key\` and \`input.sections[].format\` from the data block below; only emit gaps that appear in \`input.gaps\`.
+
+**Headline is bilingual too.** Every \`headline\` MUST be \`{ "en": "...", "pl": "..." }\` — never a bare string. Same goes for \`body\` and \`tldr\`. Single-string headlines render as literal "undefined" titles in the Polish digest.
 
 ## PER-FORMAT LENGTH RULES
 
 **format: "prose"** (politics, country sections, category sections, globalSouth)
-- headline: bold story title, plain text (no markdown bold markers — code adds those)
-- body: 2-4 sentences with key facts, figures, quotes, context. Citations baked in as markdown links — see CITATIONS below.
-- tldr: 1-2 sentence summary capturing the single most important fact, plus the citation link.
+- headline: \`{ en, pl }\` — bold story title in each language, plain text (no markdown bold markers — code adds those)
+- body: \`{ en, pl }\` — 2-4 sentences with key facts, figures, quotes, context. Citations baked in as markdown links — see CITATIONS below.
+- tldr: \`{ en, pl }\` — 1-2 sentence summary capturing the single most important fact, plus the citation link.
 
 **format: "bullets"** (alsoNotable, happenedInWorld, sports, culture)
-- headline: bold prefix only — country ("Kazakhstan"), competition ("Champions League"), type ("Film", "Music", "Polish culture")
-- body: ONE sentence + citation link
-- tldr: identical to body — bullets are already concise; do not shorten further
+- headline: \`{ en, pl }\` — bold prefix only (country "Kazakhstan" / "Kazachstan", competition "Champions League" / "Liga Mistrzów", type "Film", "Music"/"Muzyka", "Polish culture" / "Polska kultura")
+- body: \`{ en, pl }\` — ONE sentence + citation link
+- tldr: identical to body in each language — bullets are already concise
 
 **format: "editorial"** (editorial picks)
-- headline: bold title of the piece
-- body: 2-3 sentences summarising what the piece argues and why it matters, plus citation link
-- tldr: identical to body — editorial picks are kept at full 2-3 sentences in the briefing too
+- headline: \`{ en, pl }\` — bold title of the piece
+- body: \`{ en, pl }\` — 2-3 sentences summarising what the piece argues and why it matters, plus citation link
+- tldr: identical to body in each language — editorial picks are kept at full 2-3 sentences in the briefing too
 
 ## CITATIONS
 

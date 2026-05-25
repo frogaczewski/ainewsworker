@@ -2216,6 +2216,7 @@ export default {
     //   ?date=YYYY-MM-DD     → override date.
     if (url.pathname === '/run-stage-c' && request.method === 'POST') {
       const date = url.searchParams.get('date') ?? todayUtc();
+      const force = url.searchParams.get('force') === 'true';
       try {
         const stateRaw = await env.DIGEST_KV.get(`batch:compile:${date}`);
         if (!stateRaw) {
@@ -2225,8 +2226,16 @@ export default {
           );
         }
         const state = JSON.parse(stateRaw) as CompileBatchState;
+        // `force=true` clears the lastSuccess heartbeat so pollCompileOnce
+        // re-parses + re-assembles + re-sends. Useful when the first render
+        // was bad (e.g. assembleAll regressed) and we want a clean retry
+        // off the cached Sonnet output rather than burning another batch.
+        if (force) {
+          await env.DIGEST_KV.delete('digest:lastSuccess');
+          console.log(`[RunStageC] force=true → cleared digest:lastSuccess for re-render of ${date}`);
+        }
         const done = await pollCompileOnce(env, date, 0, !!state.testMode);
-        return new Response(JSON.stringify({ status: done ? 'done' : 'in-progress', date }), { headers: JSON_HEADERS });
+        return new Response(JSON.stringify({ status: done ? 'done' : 'in-progress', date, force }), { headers: JSON_HEADERS });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return new Response(JSON.stringify({ status: 'error', error: message }), {
