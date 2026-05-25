@@ -314,11 +314,28 @@ export function escapeStrayQuotes(text: string): string {
       while (j < text.length && (text[j] === ' ' || text[j] === '\t' || text[j] === '\n' || text[j] === '\r')) j++;
       const next = text[j] ?? '';
       const looksLikeClose = next === ',' || next === ':' || next === ']' || next === '}' || next === '';
-      // Override only when peek is `:` AND there's an unmatched „ — that's
-      // the "Polish quote mistaken for JSON key separator" case. Other
-      // legal-close peeks (`,` `]` `}` end) still close normally, so
-      // unmatched-„ strings that just end with a real JSON close stay safe.
-      if (looksLikeClose && !(next === ':' && polishOpen > 0)) {
+      // Override 1: peek is `:` AND there's an unmatched „ — the "Polish
+      // quote mistaken for JSON key separator" case (2026-05-15).
+      // Override 2: peek is `,` AND there's an unmatched „ — the model
+      // emitted prose like `„patologią", „anomalią”` where the comma is
+      // sentence punctuation, not a JSON separator. Peek past the comma:
+      // a real JSON `,` is followed by `"` (next key), value start
+      // (`{ [ - digit n t f`), or EOF. Anything else means prose
+      // (2026-05-25 batch msgbatch_01YPFEuVn9bC55aWW6Ye1YsL, byte 16118).
+      let realClose = looksLikeClose;
+      if (next === ':' && polishOpen > 0) realClose = false;
+      if (next === ',' && polishOpen > 0) {
+        let k = j + 1;
+        while (k < text.length && (text[k] === ' ' || text[k] === '\t' || text[k] === '\n' || text[k] === '\r')) k++;
+        const afterComma = text[k] ?? '';
+        const isJsonStart =
+          afterComma === '"' || afterComma === '{' || afterComma === '[' ||
+          afterComma === '-' || (afterComma >= '0' && afterComma <= '9') ||
+          afterComma === 'n' || afterComma === 't' || afterComma === 'f' ||
+          afterComma === '';
+        if (!isJsonStart) realClose = false;
+      }
+      if (realClose) {
         inString = false;
         out += c;
         i++;
