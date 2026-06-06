@@ -16,6 +16,7 @@ import {
   parseStructuredDigest,
   repairJsonDrift,
   escapeStrayQuotes,
+  salvageArrayPrefix,
   assembleAll,
   DIGEST_JSON_SCHEMA,
   type AssembleOptions,
@@ -1239,6 +1240,30 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
       );
     });
   }
+
+  // Guard: the batch "succeeded" but the structured payload was unparseable
+  // even after repair + salvage (sections still a string, or salvage yielded
+  // nothing — e.g. corruption in the very first section). Handing a non-array
+  // `sections` to assembleAll crashes on `sections.length` of undefined and
+  // ships nothing (2026-06-06: re-polled this same bad batch every cron until
+  // the 04:30 watchdog alarm). Treat it like a failed compile instead:
+  // resubmit once for a fresh generation, then alarm if it recurs.
+  if (!Array.isArray(structured.sections) || structured.sections.length === 0) {
+    if (state.retryCount >= 1) {
+      const msg =
+        `[PollCompile] ABORTING — structured sections unparseable twice ` +
+        `(date=${date}, batchId=${state.batchId}, sectionsType=${typeof structured.sections})`;
+      console.error(msg);
+      await sendErrorEmail(env, msg).catch(() => undefined);
+      return true;
+    }
+    console.warn(
+      `[PollCompile] sections unparseable after repair+salvage (type=${typeof structured.sections}), resubmitting once`,
+    );
+    await resubmitCompileBatch(env, date, state, testMode);
+    return false;
+  }
+
   await runStageCSendDigest(env, date, structured, !!testMode);
   return true;
 }
@@ -1258,34 +1283,33 @@ function logParseFailContext(text: string, path: string, errMsg: string, label: 
   return pos;
 }
 
-// Lossy salvage: for an array-shaped JSON that fails to parse at some
-// position, find the last clean section boundary (`},` between objects)
-// before the error and truncate there, closing the array. Callers ship a
-// partial digest rather than failing the whole pipeline.
-function trySalvageArray(text: string, errorPos: number, path: string): unknown[] | null {
-  const upTo = text.slice(0, errorPos);
-  const lastBoundary = Math.max(
-    upTo.lastIndexOf('},'),
-    upTo.lastIndexOf('}\n,'),
-    upTo.lastIndexOf('} ,'),
-  );
-  if (lastBoundary === -1) return null;
-  const truncated = text.slice(0, lastBoundary + 1) + ']';
-  try {
-    const parsed = JSON.parse(truncated);
-    if (!Array.isArray(parsed)) return null;
-    console.log(`[Normalise] salvaged ${parsed.length} elements at ${path} by truncating to byte ${lastBoundary + 1}`);
-    return parsed;
-  } catch (err) {
-    console.warn(`[Normalise] salvage truncate also failed at ${path}: ${err instanceof Error ? err.message : err}`);
-    return null;
-  }
-}
-
-// Try JSON.parse, falling back to repairJsonDrift on failure, then to a
-// truncate-at-last-clean-boundary salvage for arrays. Last resort: return
-// the original string so downstream alarms cleanly rather than crashing.
+// Parse a JSON string the Sonnet compile sometimes emits for a nested array,
+// tolerating the model's quote drift. Pass order matters:
+//
+//   1. raw JSON.parse                       — clean output, the common case.
+//   2. escapeStrayQuotes(raw)               — PRIMARY repair. The model's drift
+//      is uniform: it opens Polish quotes with „ and closes with a straight "
+//      (the 2026-06-06 payload had 19 „ and zero ”), leaving stray " mid-prose.
+//      The stateful schema-grounded walk escapes exactly those. Run on the RAW
+//      text because repairJsonDrift's regexes rewrite „X" → „X” and can shift a
+//      stray quote into a position escapeStrayQuotes then mis-reads — that
+//      interaction is what desynced the parser and crashed production
+//      (recovers all 18 sections of the real payload on its own).
+//   3. repairJsonDrift(raw)                 — regex fallback for any pattern the
+//      stateful walk misses but the narrow rules catch.
+//   4. escapeStrayQuotes(repairJsonDrift)   — combined last repair attempt.
+//   5. salvageArrayPrefix                   — structural maximal-clean-prefix
+//      floor so a partial array always ships rather than nothing.
+//
+// Returns { ok: false } only when even salvage finds no complete element, so
+// the caller can resubmit instead of handing a raw string downstream.
 function tryParseJson(text: string, path: string): { ok: true; value: unknown } | { ok: false } {
+  const attempts: { label: string; candidate: string }[] = [
+    { label: 'escape-raw', candidate: escapeStrayQuotes(text) },
+    { label: 'repair', candidate: repairJsonDrift(text) },
+  ];
+  attempts.push({ label: 'repair+escape', candidate: escapeStrayQuotes(attempts[1].candidate) });
+
   try {
     return { ok: true, value: JSON.parse(text) };
   } catch (err) {
@@ -1294,40 +1318,32 @@ function tryParseJson(text: string, path: string): { ok: true; value: unknown } 
     logParseFailContext(text, path, msg, 'first-pass');
   }
 
-  // Pass 2: repair known drift patterns, retry.
-  const repaired = repairJsonDrift(text);
-  try {
-    const value = JSON.parse(repaired);
-    console.log(`[Normalise] parsed after repair at ${path} (${text.length} → ${repaired.length} chars)`);
-    return { ok: true, value };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[Normalise] repair-then-parse failed at ${path}: ${msg}`);
-    logParseFailContext(repaired, path, msg, 'repaired');
-  }
-
-  // Pass 3: stateful walk that escapes any straight `"` stuck mid-prose
-  // (model emits unescaped emphasis quotes like `"national side,"`).
-  // Verified locally on the failing test-1 sample — recovers all 18
-  // sections after rewriting 28 stray quotes.
-  const escaped = escapeStrayQuotes(repaired);
-  try {
-    const value = JSON.parse(escaped);
-    console.log(`[Normalise] parsed after escapeStrayQuotes at ${path} (${repaired.length} → ${escaped.length} chars)`);
-    return { ok: true, value };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[Normalise] escape-then-parse failed at ${path}: ${msg}`);
-    const errorPos = logParseFailContext(escaped, path, msg, 'escaped');
-
-    // Pass 4 (arrays only): truncate at the last clean `},` boundary so
-    // we ship a partial digest rather than nothing.
-    if (errorPos !== null && escaped.trim().startsWith('[')) {
-      const salvaged = trySalvageArray(escaped, errorPos, path);
-      if (salvaged) return { ok: true, value: salvaged };
+  for (const { label, candidate } of attempts) {
+    try {
+      const value = JSON.parse(candidate);
+      console.log(`[Normalise] parsed after ${label} at ${path} (${text.length} → ${candidate.length} chars)`);
+      return { ok: true, value };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[Normalise] ${label}-then-parse failed at ${path}: ${msg}`);
+      logParseFailContext(candidate, path, msg, label);
     }
-    return { ok: false };
   }
+
+  // Floor (arrays only): salvage the maximal run of clean leading elements so
+  // we ship a partial digest rather than nothing. Runs unconditionally — it
+  // does not depend on a parse-error offset (V8 omits `position N` from
+  // "Unexpected token" messages, which used to skip salvage entirely and leave
+  // `sections` a raw string → assembleAll crash, 2026-06-06 watchdog alarm).
+  if (text.trim().startsWith('[')) {
+    const salvaged =
+      salvageArrayPrefix(attempts[0].candidate) ?? salvageArrayPrefix(text);
+    if (salvaged) {
+      console.warn(`[Normalise] salvaged ${salvaged.length} leading elements at ${path} (dropped tail after unrecoverable drift)`);
+      return { ok: true, value: salvaged };
+    }
+  }
+  return { ok: false };
 }
 
 function deepParseJsonStrings(value: unknown, path: string = '$'): unknown {

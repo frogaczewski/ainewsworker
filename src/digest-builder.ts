@@ -259,81 +259,95 @@ export function repairJsonDrift(json: string): string {
   return out;
 }
 
-// Stateful walk that rewrites `"` characters that are stuck inside a string
-// value (the model used straight " for English emphasis like `Hungary's
-// "national side,"` without escaping). When we see `"` inside a string, we
-// peek at the next non-whitespace character: if it's not a legal post-string
-// token (`,` `:` `]` `}` or end), the quote is mid-prose and we replace it
-// with `\"`. Catches drift the regex rules can't (no Polish curly-quote
-// neighbour to anchor on).
+// The complete, closed set of object keys the structured-digest JSON can use
+// (DIGEST_JSON_SCHEMA — top-level + section + story + bilingual + gap). Sonnet
+// never emits any other key, so a straight `"` immediately followed by `:` is
+// a real string terminator ONLY when the string we just read is one of these.
+// Anything else before a `:` is prose punctuation (e.g. the model wrote
+// `"„Zupełnie nie ma paliwa": na Kubie ..."` inside a value) and the quote
+// must be escaped, not treated as a key/value boundary.
+const KNOWN_JSON_KEYS = new Set([
+  'sections', 'gaps', 'marketCommentary', 'macroWatch',
+  'key', 'format', 'stories', 'link', 'headline', 'body', 'tldr',
+  'en', 'pl', 'section', 'note',
+]);
+
+// First character of a legal JSON value or key — what a real `,` separator is
+// always followed by (after optional whitespace). Used to tell a genuine
+// element separator from a sentence comma the model left inside a string.
+function isJsonTokenStart(ch: string): boolean {
+  return (
+    ch === '"' || ch === '{' || ch === '[' || ch === '-' ||
+    (ch >= '0' && ch <= '9') ||
+    ch === 'n' || ch === 't' || ch === 'f' ||
+    ch === '' // end of input
+  );
+}
+
+// Stateful walk that rewrites `"` characters stuck inside a string value (the
+// model used a straight " for emphasis or as a drifted Polish close — e.g.
+// `„dysfunkcji" wymiaru`, `Hungary's "national side,"`, `paliwa": na Kubie` —
+// without escaping). When we see `"` inside a string we peek at what follows
+// and decide whether it's a real terminator using the FIXED grammar of this
+// schema:
 //
-// Polish-curly-open counter: while we've seen `„` (U+201E) inside the current
-// string with no matching `”` (U+201D) since, a stray straight `"` followed
-// by `:` is the broken Polish close — not a JSON key separator. Without this
-// guard the peek heuristic incorrectly closes the string at `paliwa":`,
-// breaking the parser two characters in (observed 2026-05-15 batch
-// msgbatch_01V37aL3uR66N5LBbzkCrGtp, position 55394).
+//   • next is `:`  → real close only if the string we just read is a known
+//                    key (KNOWN_JSON_KEYS). A value is never followed by `:`,
+//                    so a non-key before `:` is mid-prose.
+//   • next is `,`  → real close only if the next token starts a key/value
+//                    (`"` `{` `[` digit `-` n/t/f) or EOF. A letter or curly
+//                    quote after the comma means it's sentence punctuation.
+//   • next is `}`/`]`/EOF → real close (end of the enclosing object/array).
+//   • anything else (a letter, `„`, a digit) directly after the quote → the
+//                    quote is mid-prose; escape it and stay in the string.
 //
-// Verified on 2026-04-27 batch msgbatch_01WT3YRtcGqpWVG8QS8DyMfo (180 KB
-// input, 28 stray quotes rewritten, JSON parsed cleanly into 18 sections).
+// This is schema-grounded rather than heuristic: every legitimate string
+// terminator in the digest JSON satisfies one of the first three rules, and
+// the only way a straight `"` fails all of them is by sitting inside prose.
+// It subsumes the earlier Polish-curly-open special cases (2026-05-15 colon,
+// 2026-05-25 comma) and fixes the wrong-close that desynced the parser and
+// left a stray `”` as an "Unexpected token" (2026-06-06 batch
+// msgbatch_01PbnDbqghzC9kkSo9dLG2Yk → watchdog alarm). Verified on the
+// 2026-04-27 sample (180 KB, 28 stray quotes → 18 clean sections).
 export function escapeStrayQuotes(text: string): string {
   let out = '';
   let i = 0;
   let inString = false;
-  let polishOpen = 0;
+  let cur = ''; // content of the string we're currently inside (reset on open)
   while (i < text.length) {
     const c = text[i];
     if (inString && c === '\\' && i + 1 < text.length) {
-      // Pass through any escape sequence verbatim.
+      // Pass through any escape sequence verbatim; record its payload char so
+      // `cur` reflects the real string content (e.g. an escaped quote).
       out += c + text[i + 1];
+      cur += text[i + 1];
       i += 2;
-      continue;
-    }
-    if (inString && c === '„') {
-      polishOpen++;
-      out += c;
-      i++;
-      continue;
-    }
-    if (inString && c === '”') {
-      if (polishOpen > 0) polishOpen--;
-      out += c;
-      i++;
       continue;
     }
     if (c === '"') {
       if (!inString) {
         inString = true;
-        polishOpen = 0;
+        cur = '';
         out += c;
         i++;
         continue;
       }
-      // Inside a string — is this a legitimate close? Peek.
+      // Inside a string — is this a legitimate close? Peek the next
+      // non-whitespace character and apply the schema grammar.
       let j = i + 1;
       while (j < text.length && (text[j] === ' ' || text[j] === '\t' || text[j] === '\n' || text[j] === '\r')) j++;
       const next = text[j] ?? '';
-      const looksLikeClose = next === ',' || next === ':' || next === ']' || next === '}' || next === '';
-      // Override 1: peek is `:` AND there's an unmatched „ — the "Polish
-      // quote mistaken for JSON key separator" case (2026-05-15).
-      // Override 2: peek is `,` AND there's an unmatched „ — the model
-      // emitted prose like `„patologią", „anomalią”` where the comma is
-      // sentence punctuation, not a JSON separator. Peek past the comma:
-      // a real JSON `,` is followed by `"` (next key), value start
-      // (`{ [ - digit n t f`), or EOF. Anything else means prose
-      // (2026-05-25 batch msgbatch_01YPFEuVn9bC55aWW6Ye1YsL, byte 16118).
-      let realClose = looksLikeClose;
-      if (next === ':' && polishOpen > 0) realClose = false;
-      if (next === ',' && polishOpen > 0) {
+      let realClose: boolean;
+      if (next === ':') {
+        realClose = KNOWN_JSON_KEYS.has(cur);
+      } else if (next === ',') {
         let k = j + 1;
         while (k < text.length && (text[k] === ' ' || text[k] === '\t' || text[k] === '\n' || text[k] === '\r')) k++;
-        const afterComma = text[k] ?? '';
-        const isJsonStart =
-          afterComma === '"' || afterComma === '{' || afterComma === '[' ||
-          afterComma === '-' || (afterComma >= '0' && afterComma <= '9') ||
-          afterComma === 'n' || afterComma === 't' || afterComma === 'f' ||
-          afterComma === '';
-        if (!isJsonStart) realClose = false;
+        realClose = isJsonTokenStart(text[k] ?? '');
+      } else if (next === '}' || next === ']' || next === '') {
+        realClose = true;
+      } else {
+        realClose = false;
       }
       if (realClose) {
         inString = false;
@@ -342,15 +356,67 @@ export function escapeStrayQuotes(text: string): string {
       } else {
         // Stray quote mid-prose — escape it and stay in the string.
         out += '\\"';
+        cur += '"';
         i++;
-        if (polishOpen > 0) polishOpen--;
       }
     } else {
       out += c;
+      if (inString) cur += c;
       i++;
     }
   }
   return out;
+}
+
+// Bulletproof last resort for an array-shaped JSON string that no repair pass
+// could make fully valid. Structurally scans the text — respecting strings and
+// escapes — recording every byte offset where a TOP-LEVEL element closes
+// (bracket depth returns to 1 right after a `}`). Those are the only safe
+// truncation points. We then try the longest prefix first, walking backward
+// until `JSON.parse(prefix + ']')` succeeds, so we ship the maximal run of
+// clean leading sections instead of crashing the whole digest.
+//
+// The scan desyncs once it reaches the first unescaped stray quote, but every
+// boundary it recorded BEFORE that point is valid, and any candidate prefix
+// that reaches into the corruption simply fails to parse and is skipped — so
+// the first success walking backward is exactly the maximal clean prefix.
+//
+// Unlike the old position-based salvage this needs no parse-error offset: V8's
+// "Unexpected token" messages omit `position N`, which previously skipped
+// salvage entirely and left `sections` a raw string → assembleAll crashed on
+// `sections.length` (2026-06-06 watchdog alarm).
+export function salvageArrayPrefix(text: string): unknown[] | null {
+  const s = text.trim();
+  if (!s.startsWith('[')) return null;
+  const boundaries: number[] = [];
+  let inString = false;
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inString) {
+      if (c === '\\') { i++; continue; } // skip the escaped character
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; continue; }
+    if (c === '[' || c === '{') {
+      depth++;
+    } else if (c === ']' || c === '}') {
+      depth--;
+      // depth === 1 right after a `}` means a top-level element just closed.
+      if (depth === 1 && c === '}') boundaries.push(i + 1);
+    }
+  }
+  for (let b = boundaries.length - 1; b >= 0; b--) {
+    const candidate = s.slice(0, boundaries[b]) + ']';
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch {
+      // Candidate reached into the corruption — try an earlier boundary.
+    }
+  }
+  return null;
 }
 
 export function parseStructuredDigest(response: string): StructuredDigest {
