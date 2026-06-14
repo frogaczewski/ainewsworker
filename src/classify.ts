@@ -490,6 +490,14 @@ function isNbaOrUsSport(item: ClassifiedItem): boolean {
   return cats.includes('sports') && countries.includes('US') && !countries.some(c => c !== 'US');
 }
 
+function isWorldCup(item: ClassifiedItem): boolean {
+  // FIFA World Cup (2026 tournament currently underway). Also catches Club /
+  // Women's World Cup and Spanish-language "Mundial" coverage — all worth
+  // emphasising. Cricket/Rugby World Cups match too, which is fine: they are
+  // also major tournaments we want surfaced rather than culled.
+  return /world cup|\bfifa\b|\bmundial\b/.test(item.headline.toLowerCase());
+}
+
 function isEuropeanFootball(item: ClassifiedItem): boolean {
   const headline = item.headline.toLowerCase();
   // Competitions
@@ -605,7 +613,8 @@ export function selectForDigest(classified: ClassifiedItem[]): SelectedDigestInp
   });
 
   // 7. Sports: European football ≥50% target. If NBA passed cap and
-  //    European football is underrepresented, trim more NBA.
+  //    European football is underrepresented, trim more NBA. World Cup items
+  //    are exempt from this cull — the tournament gets explicit emphasis.
   {
     const euFootball = buckets.sports.filter(isEuropeanFootball).length;
     const total = buckets.sports.length;
@@ -614,16 +623,22 @@ export function selectForDigest(classified: ClassifiedItem[]): SelectedDigestInp
       // while maintaining ≥50% european football (among remaining pool)
       const targetEu = Math.ceil(total * 0.5);
       if (euFootball < targetEu) {
-        // Can't add what we don't have; instead, cull non-EU-football down
-        const nonEu = buckets.sports.filter(it => !isEuropeanFootball(it));
+        // Can't add what we don't have; instead, cull non-EU-football down.
+        // World Cup items are never in the cull pool.
+        const nonEu = buckets.sports.filter(it => !isEuropeanFootball(it) && !isWorldCup(it));
         const maxNonEu = Math.max(euFootball, 2); // keep at least 2 non-EU items (tennis, F1, etc.)
         if (nonEu.length > maxNonEu) {
           const keepNonEu = new Set(nonEu.slice(0, maxNonEu));
-          buckets.sports = buckets.sports.filter(it => isEuropeanFootball(it) || keepNonEu.has(it));
+          buckets.sports = buckets.sports.filter(it => isEuropeanFootball(it) || isWorldCup(it) || keepNonEu.has(it));
         }
       }
     }
   }
+
+  // 7b. World Cup priority: pull World Cup stories to the front of the sports
+  //     bucket so they survive the section limit and lead the section. Sort is
+  //     stable, so the existing importance/date order is preserved otherwise.
+  buckets.sports.sort((a, b) => (isWorldCup(a) ? 0 : 1) - (isWorldCup(b) ? 0 : 1));
 
   // 8. Europe section floor: if <3, merge into alsoNotable
   if (buckets.europe.length > 0 && buckets.europe.length < 3) {

@@ -303,7 +303,7 @@ ${dateLine}For EACH item, return a JSON object:
   "pubDate": "carried through",
   "importance": "high" | "medium" | "low",
   "event_recency": "current" | "stale_commentary" | "evergreen",
-  "country_tags": ["PL","CY","NP","UA","IL","US","CN","RU","IN","FR","DE","UK","ES","IT","BR","SD","NG","ID","VN","JP","KR","PK","EG","IR","LB",...],
+  "country_tags": ["PL","CY","NP","UA","IL","TR","US","CN","RU","IN","FR","DE","UK","ES","IT","BR","SD","NG","ID","VN","JP","KR","PK","EG","IR","LB",...],
   "category_tags": ["politics","tech_ai","climate","science","business","health","sports","culture","economics","editorial"],
   "editorial": true | false
 }
@@ -316,6 +316,8 @@ ${dateLine}For EACH item, return a JSON object:
 - Scientific breakthroughs (published research, drug approvals, space milestones)
 - ANY story directly about Poland, Cyprus, Nepal, or Ukraine — these are priority countries
 - Major humanitarian crises: Sudan, Gaza, Yemen, climate disasters with significant casualties
+- **FIFA World Cup** (the tournament is currently underway): match results, scores, knockout-stage progress, standings, and upcoming fixtures are all HIGH right now — this is a flagship event, so do NOT treat World Cup matches as routine sport
+- **Turkey–Israel tensions**: any diplomatic rift, recall of ambassadors, trade suspension, sanctions, airspace closures, or escalation between Turkey and Israel — tag both TR and IL
 
 **MEDIUM** — substantive and worth noting, not urgent:
 - Domestic politics in major countries (non-PL/CY/NP/UA)
@@ -354,7 +356,7 @@ Decide when the **event** being reported actually happened — not when the arti
   Tag every country whose government, citizens, territory, or economy is the actual subject. For Middle East conflict, tag IL/IR/LB as appropriate. For Ukraine-Russia war, tag UA AND RU.
 - **category_tags**: a story can have multiple (e.g. a Ukraine strike: ["politics"]; an EU climate regulation: ["politics","climate"]; a Polish culture festival: ["culture"]). If the source is in Bellingcat/The Conversation/Intercept/Global Voices/Carbon Brief/ICIJ/OCCRP/Mongabay/The Markup, add "editorial".
 - **editorial**: true if the source is marked [EDITORIAL] in the input.
-- **Sports**: always tag category "sports". Tag country_tags with the league's country (NBA → US; Ekstraklasa → PL; Premier League → UK).
+- **Sports**: always tag category "sports". Tag country_tags with the league's country (NBA → US; Ekstraklasa → PL; Premier League → UK). For **World Cup** matches, tag the participating nations (e.g. a Brazil–France match → BR, FR) and keep importance HIGH.
 
 ## LANGUAGE
 
@@ -532,6 +534,11 @@ If \`input.gaps\` lists a note for a section, emit a corresponding entry under "
 - Do NOT use markdown blockquote syntax (\`>\`) anywhere inside any field — it does not render in email.
 - Apostrophes, em-dashes, accented characters (\`ą\`, \`ł\`, \`ś\`, \`ć\`, etc.) and emoji should appear as literal UTF-8 in your output.
 - Polish inline quotations: use the curly pair \`„\` (opening) and \`”\` (closing). English inline quotations: use the curly pair \`"\` and \`"\`.
+
+## TOPICAL EMPHASIS (within the stories you were given — do NOT add new stories)
+
+- **FIFA World Cup**: the tournament is currently underway. In the Sports section, lead with World Cup bullets ahead of club/league results. State the score/result clearly, and when the source article also mentions the team's NEXT fixture (opponent and date), append it to the same bullet — e.g. "Brazil 2-1 France in the quarter-final; next face Argentina on Wednesday." Only include a next-game detail if it appears in the source.
+- **Turkey–Israel tensions**: if a Turkey–Israel story appears in Global Politics (or BRICS & Major Powers), give it a clear, well-contextualised write-up rather than a one-line mention — name what escalated and both sides' positions, citing sources. Do not invent developments not present in the input.
 
 === INPUT SECTIONS (ordered, pre-formatted — process every story) ===
 ${sectionsJson}
