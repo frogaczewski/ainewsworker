@@ -11,6 +11,14 @@ export interface Env {
   // recipient lists in config.ts without pre-registration in KV.
   UNSUB_TOKEN_SECRET: string;
 
+  // Shared secret guarding every operational/admin HTTP endpoint (/run, /resend,
+  // /run-stage-*, /debug-*, /test-*, /feeds/health). Callers must present it as
+  // `Authorization: Bearer <token>` (or `X-Ops-Token: <token>`). The auth gate
+  // fails CLOSED: when this is unset, all operational endpoints reject. Public
+  // subscribe/confirm/unsubscribe/landing routes never require it. Set with:
+  //   openssl rand -hex 32 | npx wrangler secret put OPS_SECRET
+  OPS_SECRET?: string;
+
   // Feature flag: switch the triage stage from single Sonnet call over 200 items
   // to parallel Haiku classification over all items. Set to 'true' to enable.
   USE_BATCHED_CLASSIFICATION?: string;

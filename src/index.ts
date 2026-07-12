@@ -2041,6 +2041,52 @@ async function handleQueue(batch: MessageBatch<QueueMessage>, env: Env): Promise
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Auth gate for operational/admin endpoints.
+//
+// Every route except the public-facing ones below requires a bearer token that
+// matches the OPS_SECRET secret. Fails CLOSED: if OPS_SECRET is unset the worker
+// rejects all operational calls, so a missing secret can never mean "open to the
+// world" (the exact regression this gate exists to prevent). The token is only
+// accepted via headers — never a query param — so it never lands in request
+// logs / observability. The scheduled (cron) handler does not pass through
+// .fetch, so the daily digest pipeline is unaffected by this gate.
+//   openssl rand -hex 32 | npx wrangler secret put OPS_SECRET
+//   curl -X POST -H "Authorization: Bearer <token>" https://<host>/run
+// ──────────────────────────────────────────────────────────────────────────────
+
+const PUBLIC_EXACT_PATHS = new Set<string>([
+  '/',
+  '/api/subscribe',
+  '/confirm',
+  '/unsubscribe',
+  '/api/unsubscribe',
+  '/finalize-unsubscribe',
+]);
+
+function isPublicPath(pathname: string): boolean {
+  if (PUBLIC_EXACT_PATHS.has(pathname)) return true;
+  if (pathname.startsWith('/story/')) return true;
+  return false;
+}
+
+function constantTimeStringEquals(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function isAuthorizedOps(request: Request, env: Env): boolean {
+  const secret = env.OPS_SECRET;
+  if (!secret) return false; // fail closed — no secret configured means no access
+  const authHeader = request.headers.get('Authorization') ?? '';
+  const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const provided = bearer || (request.headers.get('X-Ops-Token') ?? '').trim();
+  if (!provided) return false;
+  return constantTimeStringEquals(provided, secret);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // HTTP handler.
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -2055,6 +2101,17 @@ export default {
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    // Auth gate. Operational/admin endpoints (/run, /resend, /run-stage-*,
+    // /debug-*, /test-*, /feeds/health, and any unknown route) require a valid
+    // OPS_SECRET bearer token. Public routes (landing, /story/*, and the
+    // subscribe/confirm/unsubscribe flow) are exempt. See isAuthorizedOps.
+    if (!isPublicPath(url.pathname) && !isAuthorizedOps(request, env)) {
+      return new Response(JSON.stringify({ error: 'unauthorized' }), {
+        status: 401,
+        headers: { ...JSON_HEADERS, 'WWW-Authenticate': 'Bearer' },
+      });
+    }
 
     // POST /run — full production flow. Runs Phase 1 synchronously (so the
     // caller sees errors), then enqueues Phase 2 for the queue consumer.
