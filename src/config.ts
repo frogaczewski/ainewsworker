@@ -233,7 +233,7 @@ export const EMAIL_TO = { email: 'frogaczewski@gmail.com', name: 'Filip Rogaczew
 // Hardcoded English recipients beyond the owner (EMAIL_TO). Mirrors EMAIL_TO_PL
 // for the 'en' side; KV subscribers are unioned on top at send time.
 export const EMAIL_TO_EN = [
-  { email: 'manis.kasyap@gmail.com', name: 'Manish Kasyap' },
+  { email: 'manis.kasyap@gmail.com', name: 'Manish Kumar' },
 ];
 export const EMAIL_TO_PL = [
   { email: 'jarrog@gmail.com', name: 'Jarosław Rogaczewski' },
