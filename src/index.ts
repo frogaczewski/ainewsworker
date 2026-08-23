@@ -45,7 +45,7 @@ import {
 } from './providers/anthropic-batch';
 import { sendDigestEmail, sendErrorEmail, type InlineImage } from './email';
 import { generateDigestImage } from './image';
-import { EMAIL_TO, EMAIL_TO_PL } from './config';
+import { EMAIL_TO, EMAIL_TO_EN, EMAIL_TO_PL } from './config';
 import { fetchPerPersonInterests, renderInterestsFor } from './interests';
 import { buildLandingPage, buildStoryPage } from './landing';
 import {
@@ -1651,7 +1651,7 @@ async function resolveDigestRecipients(
 ): Promise<DigestRecipient[]> {
   const hardcoded: DigestRecipient[] = lang === 'pl'
     ? EMAIL_TO_PL.map(r => ({ email: normalizeEmail(r.email), name: r.name, lang: 'pl' }))
-    : [{ email: normalizeEmail(EMAIL_TO.email), name: EMAIL_TO.name, lang: 'en' }];
+    : [EMAIL_TO, ...EMAIL_TO_EN].map(r => ({ email: normalizeEmail(r.email), name: r.name, lang: 'en' as const }));
 
   const kv = await listActiveSubscribers(env, lang);
   const kvEmails = new Set(kv.map(s => s.email));
@@ -2446,7 +2446,7 @@ export default {
 
         let onlyTo: { email: string; name: string } | undefined;
         if (toEmail) {
-          const known = [EMAIL_TO, ...EMAIL_TO_PL].find(r => r.email.toLowerCase() === toEmail.toLowerCase());
+          const known = [EMAIL_TO, ...EMAIL_TO_EN, ...EMAIL_TO_PL].find(r => r.email.toLowerCase() === toEmail.toLowerCase());
           onlyTo = known ?? { email: toEmail, name: toEmail.split('@')[0] };
         }
 

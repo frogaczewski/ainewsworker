@@ -187,7 +187,7 @@ it. Use this when emails need to go out again to everyone (or a subset).
 |---|---|
 | `?date=YYYY-MM-DD` | Which day's digest to resend (default: today). |
 | `?test=true` | Only to Filip. |
-| `?to=email@example.com` | Only to this single recipient. Uses known name if the address is in `EMAIL_TO` / `EMAIL_TO_PL`, falls back to the local-part otherwise. |
+| `?to=email@example.com` | Only to this single recipient. Uses known name if the address is in `EMAIL_TO` / `EMAIL_TO_EN` / `EMAIL_TO_PL`, falls back to the local-part otherwise. |
 | `?sync=true` | Send inline; default is queued. |
 
 Returns 404 if there's no `emailMarkdown` cached for that date (i.e. Phase 2

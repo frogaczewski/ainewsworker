@@ -1,4 +1,4 @@
-import { EMAIL_TO, EMAIL_TO_PL } from './config';
+import { EMAIL_TO, EMAIL_TO_EN, EMAIL_TO_PL } from './config';
 import type {
   Env,
   PendingSubscriberRecord,
@@ -307,7 +307,11 @@ export async function verifyUnsubToken(env: Env, token: string): Promise<Verifie
   const candidates: Array<{ email: string; lang: SubscriberLang; source: 'kv' | 'hardcoded' }> = [
     ...kvEn.map(s => ({ email: s.email, lang: 'en' as SubscriberLang, source: 'kv' as const })),
     ...kvPl.map(s => ({ email: s.email, lang: 'pl' as SubscriberLang, source: 'kv' as const })),
-    { email: normalizeEmail(EMAIL_TO.email), lang: 'en' as SubscriberLang, source: 'hardcoded' as const },
+    ...[EMAIL_TO, ...EMAIL_TO_EN].map(r => ({
+      email: normalizeEmail(r.email),
+      lang: 'en' as SubscriberLang,
+      source: 'hardcoded' as const,
+    })),
     ...EMAIL_TO_PL.map(r => ({
       email: normalizeEmail(r.email),
       lang: 'pl' as SubscriberLang,

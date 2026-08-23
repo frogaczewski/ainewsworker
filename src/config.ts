@@ -230,6 +230,11 @@ export const SUBSCRIBER_INTERESTS: Record<string, string[]> = {
 
 export const EMAIL_FROM = { email: 'ainews@rogaczewski.me', name: 'AI News Digest' };
 export const EMAIL_TO = { email: 'frogaczewski@gmail.com', name: 'Filip Rogaczewski' };
+// Hardcoded English recipients beyond the owner (EMAIL_TO). Mirrors EMAIL_TO_PL
+// for the 'en' side; KV subscribers are unioned on top at send time.
+export const EMAIL_TO_EN = [
+  { email: 'manis.kasyap@gmail.com', name: 'Manish Kasyap' },
+];
 export const EMAIL_TO_PL = [
   { email: 'jarrog@gmail.com', name: 'Jarosław Rogaczewski' },
   { email: 'adytczew@o2.pl', name: 'Adam Dulak' },
