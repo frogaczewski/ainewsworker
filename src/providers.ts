@@ -14,7 +14,7 @@ export { streamWithRetry } from './providers/base';
 export const VARIANT_CONFIGS: Record<string, VariantConfig> = {
   claude: {
     id: 'claude',
-    label: 'Claude Sonnet 4.6',
+    label: 'Claude Sonnet 5.5',
     classify: 'anthropic',
     compose: 'anthropic',
   },
@@ -29,7 +29,7 @@ export const VARIANT_CONFIGS: Record<string, VariantConfig> = {
   // cheapest and Claude is where the prose quality comes from.
   'gemini-claude': {
     id: 'gemini-claude',
-    label: 'Gemini → Claude Sonnet 4.6',
+    label: 'Gemini → Claude Sonnet 5.5',
     classify: 'gemini',
     compose: 'anthropic',
   },

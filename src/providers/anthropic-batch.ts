@@ -3,9 +3,8 @@
 // Why this exists: the synchronous streaming Sonnet compile call routinely
 // burned the 15-min queue wall-time budget when Anthropic's stream stalled
 // (see exceededCpu / wallTimeMs=899996 incidents on 2026-04-26 and -27). The
-// batches API is async (24-hour SLA, typically minutes), 50% cheaper, and
-// returns a fully-validated tool_use input — no streaming, no empty-response
-// retry loops eating wall time.
+// batches API is async (24-hour SLA, typically minutes) and 50% cheaper —
+// no streaming, no empty-response retry loops eating wall time.
 //
 // Endpoints implemented (v1):
 //   POST /v1/messages/batches         — submit
@@ -30,7 +29,7 @@ const HTTP_TIMEOUT_MS = 30_000;
 export interface BatchRequest {
   custom_id: string;
   // Mirrors the Messages API request body shape (model, messages, max_tokens,
-  // tools, tool_choice, …). Typed as `unknown` so callers can use whatever
+  // output_config, …). Typed as `unknown` so callers can use whatever
   // they'd pass to /v1/messages without a parallel type tree.
   params: Record<string, unknown>;
 }
@@ -71,10 +70,6 @@ export interface BatchResultRecord {
 interface AnthropicContentBlock {
   type: string;
   text?: string;
-  // tool_use blocks
-  id?: string;
-  name?: string;
-  input?: unknown;
 }
 
 export interface AnthropicMessage {
@@ -181,8 +176,8 @@ export async function getBatchResults(env: Env, batchId: string): Promise<Map<st
 }
 
 // Pull the assistant's text content out of a succeeded result. Concatenates
-// every text block — Haiku classification responses are pure-text and stream
-// as one or more text content blocks.
+// every text block and skips `thinking` blocks — both Haiku classification
+// and the Sonnet structured-output compile answer in text blocks.
 export function extractText(record: BatchResultRecord): string {
   if (record.result.type !== 'succeeded' || !record.result.message) {
     throw new Error(`[Batch] extractText called on non-succeeded result (${record.custom_id}): ${record.result.type}`);
@@ -194,42 +189,4 @@ export function extractText(record: BatchResultRecord): string {
     }
   }
   return parts.join('');
-}
-
-// Pull the tool_use input JSON out of a succeeded result. Used for the Sonnet
-// structured-compile call where the model is forced to invoke the
-// emit_structured_output tool.
-//
-// Anthropic's typing says `input: map[unknown]` (already parsed object), but
-// in practice some payload paths surface it as a JSON string — fall back to
-// parsing if that's what we get. Logs a one-line shape summary so future
-// shape mismatches are debuggable from tail without re-running.
-export function extractToolUseInput<T = unknown>(record: BatchResultRecord, toolName: string): T {
-  if (record.result.type !== 'succeeded' || !record.result.message) {
-    throw new Error(`[Batch] extractToolUseInput called on non-succeeded result (${record.custom_id}): ${record.result.type}`);
-  }
-  const blocks = record.result.message.content;
-  const blockSummary = blocks.map(b => `${b.type}${b.type === 'tool_use' ? `:${b.name ?? '?'}` : ''}`).join(',');
-  for (const block of blocks) {
-    if (block.type === 'tool_use' && block.name === toolName && block.input !== undefined) {
-      const raw = block.input;
-      if (typeof raw === 'string') {
-        // Defensive: some response paths return the input as a JSON string.
-        try {
-          const parsed = JSON.parse(raw) as T;
-          console.log(`[Batch] extractToolUseInput: parsed string input (${raw.length} chars) for ${record.custom_id}`);
-          return parsed;
-        } catch (err) {
-          throw new Error(`[Batch] tool_use input was a string but not valid JSON for ${record.custom_id}: ${err instanceof Error ? err.message : err}`);
-        }
-      }
-      if (raw && typeof raw === 'object') {
-        const keys = Object.keys(raw as Record<string, unknown>).join(',');
-        console.log(`[Batch] extractToolUseInput: input keys=[${keys}] blocks=[${blockSummary}] for ${record.custom_id}`);
-        return raw as T;
-      }
-      throw new Error(`[Batch] tool_use input had unexpected type "${typeof raw}" for ${record.custom_id}`);
-    }
-  }
-  throw new Error(`[Batch] No tool_use block named "${toolName}" in result for ${record.custom_id}. Blocks: [${blockSummary}]`);
 }

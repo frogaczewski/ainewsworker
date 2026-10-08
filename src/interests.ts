@@ -152,7 +152,8 @@ async function curateInterest(
 ): Promise<CuratedInterestItem[]> {
   const provider = resolveProvider(config, 'cheap');
   const prompt = buildCurationPrompt(def, items);
-  const response = await provider.call(env, 'cheap', prompt, 2000);
+  // Budget includes room for Haiku 5.5's adaptive thinking.
+  const response = await provider.call(env, 'cheap', prompt, 8000);
   const parsed = parseCuratedJson(response);
 
   // Only keep entries whose link was actually in the input — guards against

@@ -40,7 +40,6 @@ import {
   getBatchStatus,
   getBatchResults,
   extractText,
-  extractToolUseInput,
   type BatchRequest,
 } from './providers/anthropic-batch';
 import { sendDigestEmail, sendErrorEmail, type InlineImage } from './email';
@@ -332,11 +331,13 @@ async function compileStructured(
     { total: phase1.feedStats.total, failed: phase1.feedStats.failed },
   );
   const provider = resolveProvider(config, 'standard');
-  // Prefer native structured output (Anthropic tool_use). The model is
-  // mechanically constrained to emit JSON matching DIGEST_JSON_SCHEMA, which
-  // eliminates the entire class of text-mode JSON parse failures (trailing
-  // commas, Polish curly-quote/straight-quote pairing, etc.). Providers
-  // without callJson fall back to text + parseStructuredDigest.
+  // Prefer native structured output (Anthropic `output_config.format`). The
+  // model is mechanically constrained to emit JSON matching DIGEST_JSON_SCHEMA,
+  // which eliminates the entire class of text-mode JSON parse failures
+  // (trailing commas, Polish curly-quote/straight-quote pairing, etc.).
+  // Providers without callJson fall back to text + parseStructuredDigest.
+  // callJson gets 64000: Sonnet 5.5's tokenizer counts ~30% more tokens than
+  // 4.6's and adaptive thinking shares the budget.
   let structured: StructuredDigest;
   if (provider.callJson) {
     structured = await provider.callJson<StructuredDigest>(
@@ -344,7 +345,7 @@ async function compileStructured(
       'standard',
       prompt,
       DIGEST_JSON_SCHEMA,
-      32000,
+      64000,
     );
   } else {
     const raw = await provider.call(env, 'standard', prompt, 32000);
@@ -352,7 +353,7 @@ async function compileStructured(
   }
   const assembled = assembleAll(structured, assembleOptionsFor(phase1));
   console.log(
-    `[Compile] Structured (${config.id}, ${provider.callJson ? 'tool_use' : 'text'}) OK — ` +
+    `[Compile] Structured (${config.id}, ${provider.callJson ? 'structured' : 'text'}) OK — ` +
       `EN ${assembled.fullDigestEn.length}c / PL ${assembled.fullDigestPl.length}c, ` +
       `briefings EN ${assembled.briefingEn.length}c / PL ${assembled.briefingPl.length}c`,
   );
@@ -744,9 +745,35 @@ async function runTestVariant(
 // timeout cascade burning the worker budget. 50% cost discount is incidental.
 // ──────────────────────────────────────────────────────────────────────────────
 
-const HAIKU_BATCH_MODEL = 'claude-haiku-4-5-20251001';
-const SONNET_BATCH_MODEL = 'claude-sonnet-4-6';
-const STRUCTURED_TOOL_NAME = 'emit_structured_output';
+const HAIKU_BATCH_MODEL = 'claude-haiku-5-5';
+const SONNET_BATCH_MODEL = 'claude-sonnet-5-5';
+// Resubmit target when the compile is declined (stop_reason=refusal): the
+// same prompt on the same model would most likely be declined again. Same
+// price as Sonnet 5.5, fewer safety-classifier categories.
+const SONNET_REFUSAL_FALLBACK_MODEL = 'claude-sonnet-5';
+// Both models think adaptively by default; `high` favours output quality.
+// Thinking tokens count toward max_tokens.
+const BATCH_EFFORT = 'high';
+
+// Sonnet compile request. Structured outputs constrain decoding to
+// DIGEST_JSON_SCHEMA, so the answer text is guaranteed-valid JSON — the
+// forced tool_choice used before returns a 400 on Sonnet 5.5.
+//
+// max_tokens 128000 — the model's output ceiling. Bilingual EN+PL output with
+// ~80 stories already pushed past 32000 on Sonnet 4.6 (2026-04-27, batch
+// msgbatch_01TsC2do3AvX4t5gDsbaxAA1); the 5.x tokenizer counts ~30% more
+// tokens for the same text and thinking now shares the budget.
+function compileBatchParams(compilePrompt: string, model: string): Record<string, unknown> {
+  return {
+    model,
+    max_tokens: 128000,
+    output_config: {
+      effort: BATCH_EFFORT,
+      format: { type: 'json_schema', schema: DIGEST_JSON_SCHEMA },
+    },
+    messages: [{ role: 'user', content: compilePrompt }],
+  };
+}
 
 // Stage B time budget — past this, we accept partial results if at least
 // half succeeded, otherwise abort + alarm. Anchored to the Stage A submission
@@ -861,7 +888,10 @@ async function runStageA(env: Env, date: string, opts: { testMode?: boolean } = 
       custom_id: customId,
       params: {
         model: HAIKU_BATCH_MODEL,
-        max_tokens: 12000,
+        // Room for thinking at high effort plus the ~75-item JSON array (was
+        // 12000 on Haiku 4.5). Batches have no HTTP timeout to worry about.
+        max_tokens: 64000,
+        output_config: { effort: BATCH_EFFORT },
         messages: [{ role: 'user', content: buildClassificationPrompt(batch, date) }],
       },
     };
@@ -1015,6 +1045,16 @@ async function runStageBCompose(env: Env, date: string, state: ClassifyBatchStat
       console.log(`[StageB] Batch ${batchIdx} (${customId}) result missing or non-succeeded`);
       continue;
     }
+    // Haiku 5.5 safety classifiers can decline; there's no fallback model,
+    // so the batch just counts as failed like any other.
+    if (record.result.message?.stop_reason === 'refusal') {
+      failedBatches++;
+      console.log(
+        `[StageB] Batch ${batchIdx} (${customId}) declined: ` +
+          `stop_details=${JSON.stringify(record.result.message.stop_details ?? null)}`,
+      );
+      continue;
+    }
     try {
       const text = extractText(record);
       const items = parseClassifiedJson(text);
@@ -1081,8 +1121,7 @@ async function runStageBCompose(env: Env, date: string, state: ClassifyBatchStat
   await env.DIGEST_KV.put('digest:phase1Success', date);
 
   // Submit the single-request Sonnet structured-compile batch. Same prompt
-  // and tool_use schema as the streaming compileStructured path; the API
-  // server validates the tool_use input against DIGEST_JSON_SCHEMA.
+  // and schema as the streaming compileStructured path.
   const compilePrompt = buildStructuredCompilationPrompt(
     selectedInput,
     state.markets,
@@ -1091,22 +1130,7 @@ async function runStageBCompose(env: Env, date: string, state: ClassifyBatchStat
   const customId = customIdForCompile(date);
   const { id: compileBatchId } = await submitBatch(env, [{
     custom_id: customId,
-    params: {
-      model: SONNET_BATCH_MODEL,
-      // 64000 — Sonnet 4.6's native output cap. Bilingual EN+PL structured
-      // output with ~80 stories and 300-word prose bodies pushed past 32000
-      // (test on 2026-04-27 hit max_tokens with input={}, see batch
-      // msgbatch_01TsC2do3AvX4t5gDsbaxAA1). Keep this near the model ceiling
-      // until we have a tighter prompt budget.
-      max_tokens: 64000,
-      messages: [{ role: 'user', content: compilePrompt }],
-      tools: [{
-        name: STRUCTURED_TOOL_NAME,
-        description: 'Emit the structured digest output. The model MUST invoke this tool — its `input` is parsed and used directly downstream.',
-        input_schema: DIGEST_JSON_SCHEMA,
-      }],
-      tool_choice: { type: 'tool', name: STRUCTURED_TOOL_NAME },
-    },
+    params: compileBatchParams(compilePrompt, SONNET_BATCH_MODEL),
   }]);
   console.log(`[StageB] Submitted Sonnet compile batch ${compileBatchId}`);
 
@@ -1183,10 +1207,30 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
     return false;
   }
 
+  // A safety-classifier decline is a "succeeded" result with
+  // stop_reason=refusal and output that needn't match the schema. Retry once
+  // on the fallback model (server-side `fallbacks` isn't available on the
+  // Batches API), then alarm.
+  if (record.result.message?.stop_reason === 'refusal') {
+    const details = JSON.stringify(record.result.message.stop_details ?? null);
+    if (state.retryCount >= 1) {
+      const msg =
+        `[PollCompile] ABORTING — compile declined (stop_reason=refusal) after a retry ` +
+        `(date=${date}, batchId=${state.batchId}, stop_details=${details})`;
+      console.error(msg);
+      await sendErrorEmail(env, msg).catch(() => undefined);
+      return true;
+    }
+    console.warn(
+      `[PollCompile] Sonnet declined (stop_details=${details}), resubmitting once on ${SONNET_REFUSAL_FALLBACK_MODEL}`,
+    );
+    await resubmitCompileBatch(env, date, state, testMode, SONNET_REFUSAL_FALLBACK_MODEL);
+    return false;
+  }
+
   // Treat max_tokens truncation as a logical failure of the same severity as
-  // an errored result — Anthropic's batch API surfaces a tool_use block but
-  // discards the partial input, so we'd otherwise crash on `sections is not
-  // iterable` with no clear cause.
+  // an errored result — the structured output is cut off mid-JSON, so we'd
+  // otherwise crash on `sections is not iterable` with no clear cause.
   if (record.result.message?.stop_reason === 'max_tokens') {
     if (state.retryCount >= 1) {
       const msg =
@@ -1203,27 +1247,37 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
   }
 
   // Diagnostic log of the assistant message envelope — stop_reason and usage
-  // explain truncation / refusal cases that produce an empty tool_use input.
+  // explain truncation / refusal cases that produce empty or partial output.
   const message = record.result.message;
   if (message) {
     const usage = message.usage ?? {};
     console.log(
-      `[PollCompile] message: stop_reason=${message.stop_reason} ` +
+      `[PollCompile] message: model=${message.model} stop_reason=${message.stop_reason} ` +
         `out_tokens=${usage.output_tokens ?? '?'} in_tokens=${usage.input_tokens ?? '?'} ` +
         `stop_details=${message.stop_details ? JSON.stringify(message.stop_details) : 'n/a'}`,
     );
-    // Truncated raw record dump — first 4 KB. Tool input is just the news
+    // Truncated raw record dump — first 4 KB. The output is just the news
     // we just submitted, so logging it isn't sensitive. Helps diagnose cases
-    // where the API's input field is at an unexpected path.
+    // where the content arrives in an unexpected shape.
     console.log(`[PollCompile] raw record (first 4KB): ${JSON.stringify(record).slice(0, 4000)}`);
   }
 
-  // Succeeded: extract structured input. Anthropic's tool_use sometimes
-  // returns nested arrays/objects as JSON-encoded strings (observed on the
-  // 2026-04-27 test, batch msgbatch_01WT3YRtcGqpWVG8QS8DyMfo, where
-  // `sections` came back as a string despite the schema declaring `type:
-  // array`). Normalise before handing off to assembleAll.
-  const rawStructured = extractToolUseInput<Record<string, unknown>>(record, STRUCTURED_TOOL_NAME);
+  // Succeeded: parse the structured-output JSON from the text block(s).
+  // Decoding is constrained to DIGEST_JSON_SCHEMA, so this should parse on the
+  // first pass. tryParseJson's repair passes and normaliseStructured's walk
+  // for stringified nested JSON stay as a safety net from the Sonnet 4.6
+  // tool_use era (stringified `sections` on 2026-04-27, quote drift on
+  // 2026-06-06). Anything still unparseable falls through to the empty-
+  // sections guard below, which resubmits.
+  const outputText = extractText(record).trim();
+  const parsedOutput = tryParseJson(outputText, '$');
+  if (!parsedOutput.ok) {
+    console.warn(`[PollCompile] structured output unparseable (${outputText.length} chars)`);
+  }
+  const rawStructured =
+    parsedOutput.ok && parsedOutput.value && typeof parsedOutput.value === 'object' && !Array.isArray(parsedOutput.value)
+      ? (parsedOutput.value as Record<string, unknown>)
+      : {};
   const structured = normaliseStructured(rawStructured);
   console.log(
     `[PollCompile] structured shape: sectionsType=${typeof structured.sections} ` +
@@ -1268,11 +1322,12 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
   return true;
 }
 
-// Anthropic's tool_use occasionally surfaces nested arrays / objects as
-// JSON-encoded strings instead of native values. The 2026-04-27 test
+// Sonnet 4.6's forced tool_use occasionally surfaced nested arrays / objects
+// as JSON-encoded strings instead of native values. The 2026-04-27 test
 // returned `sections` stringified at top level and `stories` stringified
-// inside each section. Walk the value recursively and parse any string that
-// looks like a JSON array / object — pure code, no LLM round trip.
+// inside each section. Structured outputs shouldn't do this; kept as a
+// safety net. Walk the value recursively and parse any string that looks
+// like a JSON array / object — pure code, no LLM round trip.
 function logParseFailContext(text: string, path: string, errMsg: string, label: string): number | null {
   const posMatch = errMsg.match(/position (\d+)/);
   if (!posMatch) return null;
@@ -1382,6 +1437,7 @@ async function resubmitCompileBatch(
   date: string,
   state: CompileBatchState,
   testMode: boolean,
+  model: string = SONNET_BATCH_MODEL,
 ): Promise<void> {
   const phase1Raw = await env.DIGEST_KV.get(`phase1:${date}`);
   if (!phase1Raw) {
@@ -1396,22 +1452,7 @@ async function resubmitCompileBatch(
   const customId = customIdForCompile(date);
   const { id: newBatchId } = await submitBatch(env, [{
     custom_id: customId,
-    params: {
-      model: SONNET_BATCH_MODEL,
-      // 64000 — Sonnet 4.6's native output cap. Bilingual EN+PL structured
-      // output with ~80 stories and 300-word prose bodies pushed past 32000
-      // (test on 2026-04-27 hit max_tokens with input={}, see batch
-      // msgbatch_01TsC2do3AvX4t5gDsbaxAA1). Keep this near the model ceiling
-      // until we have a tighter prompt budget.
-      max_tokens: 64000,
-      messages: [{ role: 'user', content: compilePrompt }],
-      tools: [{
-        name: STRUCTURED_TOOL_NAME,
-        description: 'Emit the structured digest output. The model MUST invoke this tool — its `input` is parsed and used directly downstream.',
-        input_schema: DIGEST_JSON_SCHEMA,
-      }],
-      tool_choice: { type: 'tool', name: STRUCTURED_TOOL_NAME },
-    },
+    params: compileBatchParams(compilePrompt, model),
   }]);
   const newState: CompileBatchState = {
     batchId: newBatchId,
@@ -1427,7 +1468,7 @@ async function resubmitCompileBatch(
     { kind: 'poll-compile', date, attempt: 1, testMode: testMode || undefined },
     { delaySeconds: testMode ? 30 : 180 },
   );
-  console.log(`[PollCompile] Resubmitted Sonnet batch ${newBatchId} (retry=${newState.retryCount})`);
+  console.log(`[PollCompile] Resubmitted ${model} batch ${newBatchId} (retry=${newState.retryCount})`);
 }
 
 // Stage C terminal step: assemble the four markdown forms from the
@@ -1789,7 +1830,7 @@ async function translateToPolish(
 ): Promise<string> {
   try {
     const provider = resolveProvider(config, 'standard');
-    const translated = await provider.call(env, 'standard', buildTranslationPrompt(emailBriefing), 16000);
+    const translated = await provider.call(env, 'standard', buildTranslationPrompt(emailBriefing), 32000);
     console.log(`[Email] Polish translation (${config.id}): ${translated.length} characters`);
     return translated;
   } catch (err) {
@@ -2357,10 +2398,9 @@ export default {
       }
     }
 
-    // GET /debug-batch-input?date=test-1 — return the raw `sections` string
-    // from the day's compile batch, exactly as Anthropic returned it. Useful
-    // for debugging JSON-parse failures locally without redeploying.
-    //   Returns text/plain; the body is the unescaped sections value.
+    // GET /debug-batch-input?date=test-1 — return the raw structured-output
+    // JSON text from the day's compile batch, exactly as Anthropic returned
+    // it. Useful for debugging JSON-parse failures locally without redeploying.
     if (url.pathname === '/debug-batch-input' && request.method === 'GET') {
       const date = url.searchParams.get('date');
       if (!date) {
@@ -2377,11 +2417,11 @@ export default {
         if (!record || record.result.type !== 'succeeded' || !record.result.message) {
           return new Response(JSON.stringify({ error: 'no succeeded result', record }), { status: 404, headers: JSON_HEADERS });
         }
-        const toolUseBlock = record.result.message.content.find(b => b.type === 'tool_use' && b.name === STRUCTURED_TOOL_NAME);
-        if (!toolUseBlock) {
-          return new Response(JSON.stringify({ error: 'no tool_use block', content: record.result.message.content }), { status: 404, headers: JSON_HEADERS });
+        const outputText = extractText(record);
+        if (!outputText) {
+          return new Response(JSON.stringify({ error: 'no text block', content: record.result.message.content }), { status: 404, headers: JSON_HEADERS });
         }
-        return new Response(JSON.stringify(toolUseBlock.input, null, 2), {
+        return new Response(outputText, {
           headers: { 'Content-Type': 'application/json' },
         });
       } catch (err) {

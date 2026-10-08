@@ -133,13 +133,15 @@ const READ_MORE: Record<Lang, (url: string) => string> = {
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
-// JSON schema for native tool-use (Anthropic) — the model emits a tool_use
-// block whose `input` is validated against this shape on the API server. No
-// more text-mode JSON parsing for callers that use callJson.
+// JSON schema for Anthropic structured outputs (`output_config.format`) —
+// decoding is constrained to this shape, so the response text is always valid
+// JSON. Structured outputs require `additionalProperties: false` on every
+// object.
 // ──────────────────────────────────────────────────────────────────────────────
 
 const BILINGUAL_TEXT_SCHEMA = {
   type: 'object',
+  additionalProperties: false,
   required: ['en', 'pl'],
   properties: {
     en: { type: 'string' },
@@ -149,12 +151,14 @@ const BILINGUAL_TEXT_SCHEMA = {
 
 export const DIGEST_JSON_SCHEMA = {
   type: 'object',
+  additionalProperties: false,
   required: ['sections', 'gaps', 'marketCommentary', 'macroWatch'],
   properties: {
     sections: {
       type: 'array',
       items: {
         type: 'object',
+        additionalProperties: false,
         required: ['key', 'format', 'stories'],
         properties: {
           key: { type: 'string' },
@@ -163,6 +167,7 @@ export const DIGEST_JSON_SCHEMA = {
             type: 'array',
             items: {
               type: 'object',
+              additionalProperties: false,
               required: ['link', 'headline', 'body', 'tldr'],
               properties: {
                 link: { type: 'string' },
@@ -179,6 +184,7 @@ export const DIGEST_JSON_SCHEMA = {
       type: 'array',
       items: {
         type: 'object',
+        additionalProperties: false,
         required: ['section', 'note'],
         properties: {
           section: { type: 'string' },

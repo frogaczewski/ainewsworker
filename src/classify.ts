@@ -111,7 +111,8 @@ async function classifyOneBatch(
   }
 
   const prompt = buildClassificationPrompt(batch, date);
-  const response = await provider.call(env, 'cheap', prompt, 12000);
+  // Budget includes room for Haiku 5.5's adaptive thinking.
+  const response = await provider.call(env, 'cheap', prompt, 32000);
   const parsed = parseClassifiedJson(response);
 
   // Carry imageUrl from RSS item to classified item (prompt doesn't ask for it)
@@ -277,7 +278,8 @@ export async function semanticDedup(
   let groupsRaw: string;
   try {
     const prompt = buildSemanticDedupPrompt(items);
-    groupsRaw = await provider.call(env, 'cheap', prompt, 4000);
+    // Budget includes room for Haiku 5.5's adaptive thinking.
+    groupsRaw = await provider.call(env, 'cheap', prompt, 16000);
   } catch (err) {
     console.log(`[Dedup] Semantic dedup LLM call failed: ${err instanceof Error ? err.message : err}`);
     return items;

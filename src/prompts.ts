@@ -463,7 +463,7 @@ export function buildStructuredCompilationPrompt(
 
 ## OUTPUT
 
-You will be invoked as the \`emit_structured_output\` tool. The shape of its \`input\` is fixed by a JSON schema (sections, gaps, marketCommentary, macroWatch — each story has \`link\` plus \`headline\`, \`body\`, \`tldr\` which are ALL bilingual objects with \`en\` and \`pl\` fields). Mirror \`input.sections[].key\` and \`input.sections[].format\` from the data block below; only emit gaps that appear in \`input.gaps\`.
+Respond with a single JSON object. Its shape is fixed by a JSON schema (sections, gaps, marketCommentary, macroWatch — each story has \`link\` plus \`headline\`, \`body\`, \`tldr\` which are ALL bilingual objects with \`en\` and \`pl\` fields). Mirror \`input.sections[].key\` and \`input.sections[].format\` from the data block below; only emit gaps that appear in \`input.gaps\`.
 
 **Headline is bilingual too.** Every \`headline\` MUST be \`{ "en": "...", "pl": "..." }\` — never a bare string. Same goes for \`body\` and \`tldr\`. Single-string headlines render as literal "undefined" titles in the Polish digest.
 

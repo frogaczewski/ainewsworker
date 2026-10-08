@@ -32,7 +32,9 @@ function stripCodeFence(raw: string): string {
 }
 
 async function getVisualBrief(env: Env, emailBriefing: string): Promise<VisualBrief> {
-  const raw = await anthropicProvider.call(env, 'cheap', buildBriefPrompt(emailBriefing), 400);
+  // Budget includes room for Haiku 5.5's adaptive thinking (the brief itself
+  // is ~400 tokens).
+  const raw = await anthropicProvider.call(env, 'cheap', buildBriefPrompt(emailBriefing), 4000);
   const parsed = JSON.parse(stripCodeFence(raw)) as Partial<VisualBrief>;
   if (!Array.isArray(parsed.subjects) || parsed.subjects.length === 0) {
     throw new Error('Visual brief missing subjects array');
