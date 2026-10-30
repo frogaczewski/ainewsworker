@@ -58,6 +58,61 @@ function parseAnthropicTextEvent(data: string): ParsedEvent | null {
   return null;
 }
 
+export interface StructuredMessageOptions {
+  model: string;
+  prompt: string;
+  schema: object;
+  maxTokens: number;
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  timeoutMs?: number;
+}
+
+// One non-streaming Messages call constrained by structured outputs
+// (`output_config.format`), so the text block is guaranteed to be JSON that
+// matches `schema` — unless the model stopped early, which we surface as an
+// error rather than handing back a truncated object. Used for the editorial
+// clustering call, which is small enough to run inline in Stage B.
+export async function createStructuredMessage<T>(env: Env, opts: StructuredMessageOptions): Promise<T> {
+  if (!env.CLAUDE_PLATFORM_API) {
+    throw new Error('[LLM] CLAUDE_PLATFORM_API secret is not set — add it in the Cloudflare dashboard');
+  }
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': env.CLAUDE_PLATFORM_API,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      max_tokens: opts.maxTokens,
+      messages: [{ role: 'user', content: opts.prompt }],
+      output_config: {
+        ...(opts.effort && { effort: opts.effort }),
+        format: { type: 'json_schema', schema: opts.schema },
+      },
+    }),
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 300_000),
+  });
+  if (!res.ok) {
+    throw new Error(`[LLM] ${opts.model} HTTP ${res.status}: ${(await res.text()).slice(0, 500)}`);
+  }
+  const message = (await res.json()) as {
+    stop_reason: string | null;
+    content: { type: string; text?: string }[];
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
+  console.log(
+    `[LLM] ${opts.model} structured: stop=${message.stop_reason} ` +
+      `in=${message.usage?.input_tokens ?? '?'} out=${message.usage?.output_tokens ?? '?'}`,
+  );
+  if (message.stop_reason !== 'end_turn') {
+    throw new Error(`[LLM] ${opts.model} stopped with ${message.stop_reason} — output not usable`);
+  }
+  const text = message.content.filter(b => b.type === 'text').map(b => b.text ?? '').join('');
+  return JSON.parse(text) as T;
+}
+
 export const anthropicProvider: LLMProvider = {
   id: 'anthropic',
   modelFor: (tier) => MODELS[tier],

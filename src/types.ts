@@ -23,6 +23,10 @@ export interface Env {
   // to parallel Haiku classification over all items. Set to 'true' to enable.
   USE_BATCHED_CLASSIFICATION?: string;
 
+  // Editorial editions (src/editorial.ts): daily quick-hit + Saturday weekly.
+  // On unless set to "false", which falls back to the legacy sectioned digest.
+  USE_EDITORIAL_EDITIONS?: string;
+
   // Local-dev flag: when "true", subscribe/unsubscribe confirmation emails are
   // logged to the console instead of being sent through Mailjet. Digest sends
   // are unaffected.
@@ -146,6 +150,76 @@ export interface CompileBatchState {
   customId: string;
   retryCount: number;             // 0 or 1 — second errored result aborts
   testMode?: boolean;
+  // Which compile this batch carries. Absent = legacy sectioned digest
+  // (Sonnet tool_use, DIGEST_JSON_SCHEMA). 'daily' / 'weekly' = editorial
+  // editions (structured outputs, see src/editorial.ts); their request params
+  // live at `compile:request:{date}` so a retry can resubmit them verbatim.
+  edition?: Edition;
+}
+
+export type Edition = 'daily' | 'weekly';
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Editorial editions (daily quick-hit + Saturday weekly). See src/editorial.ts.
+// ──────────────────────────────────────────────────────────────────────────────
+
+// One outlet's take on an event inside a StoryCluster.
+export interface ClusterItem {
+  source: string;
+  region: string;          // REGION_LABELS key
+  headline: string;
+  summary: string;
+  link: string;
+  pubDate: string;
+  imageUrl?: string;
+}
+
+// Every outlet that covered one real-world event on one day, plus the signals
+// the ranker derives from them. Persisted per day at `clusters:{date}` so the
+// Saturday weekly can follow storylines across the week.
+export interface StoryCluster {
+  id: string;              // unique across the week: `{date}#{n}`
+  date: string;            // digest date the cluster belongs to
+  event: string;           // canonical English label
+  importance: 'high' | 'medium' | 'low';
+  country_tags: string[];
+  category_tags: string[];
+  outletCount: number;     // distinct outlets
+  regionCount: number;     // distinct outlet regions
+  score: number;
+  items: ClusterItem[];    // one per outlet, most informative first
+}
+
+export interface EditionStory {
+  id: string;              // StoryCluster.id the story was written from
+  headline: BilingualText;
+  body: BilingualText;
+  // How outlets / regions framed the story differently. Empty strings when
+  // coverage is uniform or single-source — rendered only when non-empty.
+  coverage: BilingualText;
+}
+
+export type DailySectionKind = 'top' | 'poland' | 'world' | 'business' | 'science_tech' | 'sports' | 'culture';
+
+export interface DailyEdition {
+  // Ordered by the model — section order is decided per day, not fixed.
+  sections: { kind: DailySectionKind; stories: EditionStory[] }[];
+  weatherAlert: BilingualText;   // empty strings when the forecast is unremarkable
+  marketNote: BilingualText;
+}
+
+export interface WeeklyStory {
+  ids: string[];           // every StoryCluster.id the storyline draws on
+  headline: BilingualText;
+  narrative: BilingualText;
+  timeline: { day: string; text: BilingualText }[];   // day = YYYY-MM-DD news day
+  coverage: BilingualText;
+}
+
+export interface WeeklyEdition {
+  intro: BilingualText;
+  stories: WeeklyStory[];
+  alsoThisWeek: { ids: string[]; headline: BilingualText; text: BilingualText }[];
 }
 
 // Persisted output of Phase 1 — everything Phase 2 needs to compile + send.
@@ -163,6 +237,11 @@ export interface Phase1Output {
   // in SUBSCRIBER_INTERESTS get the relevant slice appended to their email.
   // Optional on older cached runs written before this field existed.
   interestItems?: Record<string, CuratedInterestItem[]>;
+  // Editorial editions only: which edition Stage B submitted, and the
+  // clusters the compile prompt was given (ids → outlets/links for rendering
+  // the "Sources" lines). Absent on legacy sectioned digests.
+  edition?: Edition;
+  clusters?: StoryCluster[];
 }
 
 // One curated entry in a per-person interest section. Output of the Haiku
@@ -180,6 +259,9 @@ export interface RssFeedConfig {
   url: string;
   category: string;
   editorial?: boolean;
+  // Outlet home region (key of REGION_LABELS in config.ts). Drives the
+  // coverage-breadth signal in the editorial ranker.
+  region?: string;
 }
 
 export interface RssItem {
@@ -227,6 +309,10 @@ export interface ClassifiedItem {
   // the URL-dedup stage. Optional for backwards compatibility with cached
   // pre-recency runs.
   event_recency?: 'current' | 'stale_commentary' | 'evergreen';
+  // Canonical one-line English description of the specific event (who / what /
+  // where). Two outlets covering the same event should get near-identical
+  // labels — the clusterer groups on these. Optional for pre-v2 cached runs.
+  event?: string;
   editorial?: boolean;
   imageUrl?: string;
   // Populated during Stage 3 (URL dedup + semantic dedup). Lists every outlet
@@ -354,6 +440,8 @@ export interface DigestData {
   // the Sonnet call.
   structuredDigest?: string;
   storyImages?: Record<string, string>; // maps article URL → image URL
+  // Absent = daily. 'weekly' switches email subjects on /resend.
+  edition?: Edition;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

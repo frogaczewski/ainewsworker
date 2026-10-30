@@ -30,7 +30,7 @@ export type Lang = 'en' | 'pl';
 // Localised labels
 // ──────────────────────────────────────────────────────────────────────────────
 
-const SECTION_HEADERS: Record<SectionKey, Record<Lang, string>> = {
+export const SECTION_HEADERS: Record<SectionKey, Record<Lang, string>> = {
   politics:        { en: '🏛️ Global Politics',               pl: '🏛️ Polityka Światowa' },
   poland:          { en: '🇵🇱 Poland',                         pl: '🇵🇱 Polska' },
   cyprus:          { en: '🇨🇾 Cyprus',                         pl: '🇨🇾 Cypr' },
@@ -51,12 +51,12 @@ const SECTION_HEADERS: Record<SectionKey, Record<Lang, string>> = {
   culture:         { en: '🎭 Culture',                          pl: '🎭 Kultura' },
 };
 
-const TITLES: Record<Lang, string> = {
+export const TITLES: Record<Lang, string> = {
   en: 'Daily News Digest',
   pl: 'Codzienny Przegląd Wiadomości',
 };
 
-const MARKETS_HEADER: Record<Lang, string> = {
+export const MARKETS_HEADER: Record<Lang, string> = {
   en: '📈 Markets & Macro',
   pl: '📈 Rynki i Makro',
 };
@@ -76,7 +76,7 @@ const MACRO_WATCH_HEADER: Record<Lang, string> = {
   pl: '**Wiadomości Makro i Inflacja**',
 };
 
-const WEATHER_HEADER: Record<Lang, string> = {
+export const WEATHER_HEADER: Record<Lang, string> = {
   en: '🌤️ Weather Forecast',
   pl: '🌤️ Prognoza Pogody',
 };
@@ -107,17 +107,17 @@ const WEEKDAY_PL: Record<string, string> = {
   Sunday: 'Niedziela',
 };
 
-const FOOTER: Record<Lang, (websiteUrl: string) => string> = {
+export const FOOTER: Record<Lang, (websiteUrl: string) => string> = {
   en: (url) => `*Generated automatically by AI News Digest. [Read the full digest online.](${url})*`,
   pl: (url) => `*Wygenerowano automatycznie przez AI News Digest. [Czytaj pełny przegląd online.](${url})*`,
 };
 
-const COMPILED_FROM: Record<Lang, (sourcesNote: string) => string> = {
+export const COMPILED_FROM: Record<Lang, (sourcesNote: string) => string> = {
   en: (s) => `*Compiled from ${s}. All stories from the last 24 hours. Cross-referenced across outlets.*`,
   pl: (s) => `*Opracowano na podstawie: ${s}. Wszystkie wiadomości z ostatnich 24 godzin. Porównane między źródłami.*`,
 };
 
-const READ_FULL_BOTTOM: Record<Lang, (url: string) => string> = {
+export const READ_FULL_BOTTOM: Record<Lang, (url: string) => string> = {
   en: (url) => `**[See all stories on the website →](${url})**`,
   pl: (url) => `**[Zobacz wszystkie wiadomości na stronie →](${url})**`,
 };
@@ -475,7 +475,7 @@ export function parseStructuredDigest(response: string): StructuredDigest {
 // Date / weather / market helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-function formatDate(date: Date, lang: Lang): string {
+export function formatDate(date: Date, lang: Lang): string {
   const locale = lang === 'pl' ? 'pl-PL' : 'en-GB';
   return date.toLocaleDateString(locale, {
     weekday: 'long',
@@ -492,7 +492,7 @@ function dayLabel(isoDate: string, lang: Lang): string {
   return englishDay;
 }
 
-function renderWeatherTable(weather: WeatherData[], lang: Lang): string {
+export function renderWeatherTable(weather: WeatherData[], lang: Lang): string {
   const blocks: string[] = [];
   for (const loc of weather) {
     const label = WEATHER_LOCATION_LABEL[loc.location]?.[lang] ?? loc.location;
@@ -504,7 +504,7 @@ function renderWeatherTable(weather: WeatherData[], lang: Lang): string {
   return blocks.join('\n\n');
 }
 
-function renderMarketsTable(markets: MarketData, lang: Lang): string {
+export function renderMarketsTable(markets: MarketData, lang: Lang): string {
   const rows: string[] = [];
   for (const q of markets.quotes) {
     if (q.error || q.price === null) continue;
@@ -522,7 +522,7 @@ function renderMarketsTable(markets: MarketData, lang: Lang): string {
 // Story rendering
 // ──────────────────────────────────────────────────────────────────────────────
 
-function pickLang(text: BilingualText | string | undefined | null, lang: Lang): string {
+export function pickLang(text: BilingualText | string | undefined | null, lang: Lang): string {
   // Tolerant fallback: Sonnet occasionally regresses and emits a single
   // string instead of the required {en, pl} bilingual object — observed
   // 2026-05-25 batch msgbatch_01YPFEuVn9bC55aWW6Ye1YsL where every story
@@ -625,10 +625,17 @@ export interface AssembleOptions {
   input?: SelectedDigestInput;
 }
 
-function sourcesNote(feedStats: { total: number; failed: number }): string {
-  if (feedStats.failed > 0) {
-    return `${feedStats.total - feedStats.failed} of ${feedStats.total} sources responded`;
+export function sourcesNote(feedStats: { total: number; failed: number }, lang: Lang = 'en'): string {
+  const ok = feedStats.total - feedStats.failed;
+  if (lang === 'pl') {
+    // "z N źródeł" is always genitive plural; a bare count follows the usual
+    // 1 / 2–4 / 5+ declension.
+    if (feedStats.failed > 0) return `${ok} z ${feedStats.total} źródeł`;
+    const n = feedStats.total;
+    const few = n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14);
+    return `${n} ${n === 1 ? 'źródło' : few ? 'źródła' : 'źródeł'}`;
   }
+  if (feedStats.failed > 0) return `${ok} of ${feedStats.total} sources`;
   return `${feedStats.total} sources`;
 }
 
@@ -652,7 +659,7 @@ export function assembleFullDigest(
 
   parts.push(`# ${TITLES[lang]} — ${formatDate(date, lang)}`);
   parts.push('');
-  parts.push(COMPILED_FROM[lang](sourcesNote(feedStats)));
+  parts.push(COMPILED_FROM[lang](sourcesNote(feedStats, lang)));
   parts.push('');
   parts.push('---');
 
@@ -708,7 +715,7 @@ export function assembleEmailBriefing(
 
   parts.push(`# ${TITLES[lang]} — ${formatDate(date, lang)}`);
   parts.push('');
-  parts.push(COMPILED_FROM[lang](sourcesNote(feedStats)));
+  parts.push(COMPILED_FROM[lang](sourcesNote(feedStats, lang)));
   parts.push('');
   parts.push('---');
 

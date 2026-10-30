@@ -1,4 +1,5 @@
-import type { RssItem, TriagedStory, WeatherData, MarketData, ClassifiedItem, SelectedDigestInput } from './types';
+import { REGION_LABELS } from './config';
+import type { RssItem, TriagedStory, WeatherData, MarketData, ClassifiedItem, SelectedDigestInput, StoryCluster } from './types';
 
 export function buildTriagePrompt(items: RssItem[]): string {
   const itemsText = items.map((item, i) =>
@@ -281,61 +282,65 @@ ${digest}`;
 
 /**
  * Stage 2: per-batch Haiku classification.
- * Given ~75 RSS items, emit a JSON array of ClassifiedItem objects.
- * No selection happens here — every input item is classified and returned.
+ * Given ~75 RSS items, emit {"items": [...]} with one tag object per input
+ * index; parseClassificationOutput (classify.ts) joins them back onto the RSS
+ * items. No selection happens here — every input item is classified and returned.
  * No cross-batch dedup happens here either (see Stage 3).
  */
 export function buildClassificationPrompt(items: RssItem[], todayUtc?: string): string {
+  // No LINK line: links are long and the model never needs them — code
+  // re-attaches link/source/pubDate by the returned index (parseClassificationOutput).
   const itemsText = items.map((item, i) =>
-    `[${i}] SOURCE: ${item.source}${item.editorial ? ' [EDITORIAL]' : ''}\nTITLE: ${item.title}\nSUMMARY: ${item.summary}\nLINK: ${item.link}\nDATE: ${item.pubDate}`
+    `[${i}] SOURCE: ${item.source}${item.editorial ? ' [EDITORIAL]' : ''}\nTITLE: ${item.title}\nSUMMARY: ${item.summary}\nDATE: ${item.pubDate}`
   ).join('\n\n');
 
   const dateLine = todayUtc ? `Today (UTC) is ${todayUtc}. Use this when judging event_recency.\n\n` : '';
 
-  return `You are tagging news items for a daily digest. The reader lives in Cyprus with ties to Poland and follows technology, climate, science, global politics, and business. Every item below will be classified — do NOT filter anything out, even if it looks uninteresting. Importance ratings handle that.
+  return `You are tagging news items for a news digest read by Polish readers — most live in Poland, the editor lives in Cyprus. They want to know what genuinely matters in the world and in Poland, without local noise from anywhere. Every item below will be classified — do NOT filter anything out. Importance ratings handle that.
 
-${dateLine}For EACH item, return a JSON object:
+${dateLine}For EACH item, return an object:
 {
-  "link": "carried through exactly",
-  "headline": "carried through (translate to English if Polish/Nepali/etc.)",
-  "summary": "carried through (translate to English if needed, keep under 250 chars)",
-  "source": "carried through",
-  "pubDate": "carried through",
+  "i": <the item's [index] from the input>,
+  "headline": "the headline, translated to English if it is in another language",
+  "summary": "the summary in English, under 200 characters",
+  "event": "canonical one-line English description of the specific event: who did what, where (max 15 words). Write it so that two outlets covering the same event would get almost the same line, e.g. 'High-speed train collision near Toledo, Spain kills 69'",
   "importance": "high" | "medium" | "low",
   "event_recency": "current" | "stale_commentary" | "evergreen",
-  "country_tags": ["PL","CY","NP","UA","IL","TR","US","CN","RU","IN","FR","DE","UK","ES","IT","BR","SD","NG","ID","VN","JP","KR","PK","EG","IR","LB",...],
-  "category_tags": ["politics","tech_ai","climate","science","business","health","sports","culture","economics","editorial"],
-  "editorial": true | false
+  "country_tags": ["PL","UA","RU","DE","US","CN",...],
+  "category_tags": ["politics","tech_ai","climate","science","business","health","sports","culture","economics","editorial"]
 }
 
-## IMPORTANCE RULES
+## IMPORTANCE — the one question that matters
 
-**HIGH** — the story genuinely matters to a well-informed reader:
-- Breaking events: wars, major attacks, deaths of world leaders, coups, elections being called/results announced
-- Major policy or legal decisions with broad impact (new treaties, landmark court rulings, central bank rate decisions, large regulatory changes)
-- Scientific breakthroughs (published research, drug approvals, space milestones)
-- ANY story directly about Poland, Cyprus, Nepal, or Ukraine — these are priority countries
-- Major humanitarian crises: Sudan, Gaza, Yemen, climate disasters with significant casualties
-- **FIFA World Cup** (the tournament is currently underway): match results, scores, knockout-stage progress, standings, and upcoming fixtures are all HIGH right now — this is a flagship event, so do NOT treat World Cup matches as routine sport
-- **Turkey–Israel tensions**: any diplomatic rift, recall of ambassadors, trade suspension, sanctions, airspace closures, or escalation between Turkey and Israel — tag both TR and IL
+**"Would a well-informed Polish reader want to know this today?"**
 
-**MEDIUM** — substantive and worth noting, not urgent:
-- Domestic politics in major countries (non-PL/CY/NP/UA)
-- Policy changes in second-tier countries
-- Significant business/economy stories (earnings, mergers, unemployment figures, inflation prints)
-- Notable cultural events (major awards, big exhibitions, famous artist releases)
-- Sports: top-flight league results (Champions League, Premier League, La Liga, Bundesliga, Serie A, Ekstraklasa; NBA finals; Grand Slam tennis; F1), notable upsets or milestones
-- Climate and environment developments
-- Tech/AI launches, research, regulatory decisions
-- Editorial/investigative pieces from Bellingcat, The Conversation, etc.
+Being about Poland makes a story relevant only if it matters nationally. Being about Cyprus, Nepal or any other country gives no bonus at all — judge it as a reader who does not live there would.
 
-**LOW** — don't waste the reader's time:
-- Celebrity gossip, entertainment industry fluff
-- Lifestyle/listicle content ("10 best beaches")
-- Minor local crime in countries other than PL/CY/NP with no broader significance
-- Routine league matches outside the top flight (Championship, third division, minor leagues) — UNLESS it's a historic promotion/relegation involving a well-known club
-- NBA regular-season midweek games, routine injuries, minor transactions
-- Op-eds without news peg, think-pieces rehashing known arguments
+**HIGH** — the reader would be poorer for missing it:
+- Wars and their turning points (Russia–Ukraine front lines, peace talks, strikes on cities; Middle East escalations), coups, mass-casualty attacks or disasters, deaths of world leaders
+- Elections and government crises in major countries; diplomatic ruptures or escalations between states (e.g. Turkey–Israel)
+- Decisions that move the world or Europe: EU legislation, NATO decisions, sanctions, tariffs, Fed/ECB/NBP rate decisions, major court rulings, energy-price shocks
+- Poland nationally: government and Sejm decisions with national impact, presidential actions, national security (Russia/Belarus border, drones, sabotage), major economic data, disasters or accidents of national scale, extreme weather warnings for Poland
+- Major science or tech breakthroughs, landmark AI developments
+- Sport: Polish teams or athletes in major competitions (national team, Polish clubs in European cups, Świątek, Hurkacz, Lewandowski, Polish volleyball, ski jumping); finals and title-deciders of the biggest events (Champions League knockouts, Grand Slam finals, F1 title fights, Olympics)
+
+**MEDIUM** — substantive, worth a line:
+- Domestic politics of major countries with an international echo
+- Significant business and economy news (big earnings, mergers, inflation prints, layoffs at major firms)
+- Notable Polish news below the national-headline level
+- Tech/AI launches, climate and science findings, health developments
+- Culture of international stature (major prizes, deaths of icons, landmark releases) and notable Polish culture
+- Sport: decisive top-flight results and milestones
+
+**LOW** — local noise; the reader would not miss it:
+- Local or regional news from ANY country — including Poland, Cyprus and Nepal — with no national or international consequence: workplace accidents, local court cases, municipal disputes, police internal matters, sector-specific op-eds, conference announcements
+- Domestic politics of small countries unless it is a genuine national crisis (government collapse, mass protests, violent unrest)
+- Routine sport (regular league games, previews, minor transfers, injuries), celebrity and lifestyle content, listicles
+- Op-eds and think-pieces without a news peg
+
+## EVENT RECENCY
+
+Decide when the **event** being reported actually happened — not when the article was written. The article's pubDate is recent (it just appeared in the RSS feed); what matters is whether the underlying news is still fresh for a daily digest.
 
 ## EVENT RECENCY
 
@@ -355,16 +360,15 @@ Decide when the **event** being reported actually happened — not when the arti
   - a politician from that country commented on someone else's story ("Italian PM remarks on EU budget" tagged at the Cyprus summit → tag IT and the budget's actual subjects, not CY)
   Tag every country whose government, citizens, territory, or economy is the actual subject. For Middle East conflict, tag IL/IR/LB as appropriate. For Ukraine-Russia war, tag UA AND RU.
 - **category_tags**: a story can have multiple (e.g. a Ukraine strike: ["politics"]; an EU climate regulation: ["politics","climate"]; a Polish culture festival: ["culture"]). If the source is in Bellingcat/The Conversation/Intercept/Global Voices/Carbon Brief/ICIJ/OCCRP/Mongabay/The Markup, add "editorial".
-- **editorial**: true if the source is marked [EDITORIAL] in the input.
-- **Sports**: always tag category "sports". Tag country_tags with the league's country (NBA → US; Ekstraklasa → PL; Premier League → UK). For **World Cup** matches, tag the participating nations (e.g. a Brazil–France match → BR, FR) and keep importance HIGH.
+- **Sports**: always tag category "sports". Tag country_tags with the league's country (NBA → US; Ekstraklasa → PL; Premier League → UK) and with the nationality of the teams/athletes when it is a Polish team or athlete (Świątek winning in Paris → PL, FR).
 
 ## LANGUAGE
 
-Any Polish, Nepali, or other non-English headline/summary: translate to English in the output. Keep summaries under 250 characters.
+Any Polish, Nepali, or other non-English headline/summary: translate to English in the output. Keep summaries under 200 characters.
 
 ## OUTPUT
 
-Return ONLY a JSON array of objects — one per input item, in the same order. No markdown code fences. No commentary. No items omitted.
+Return ONLY a JSON object of the form {"items": [ ... ]} — one object per input item, in the same order, each carrying its input index as "i". No markdown code fences. No commentary. No items omitted.
 
 === RSS ITEMS ===
 ${itemsText}`;
@@ -425,6 +429,29 @@ Return ONLY the JSON array, no markdown fences, no commentary.
 === ITEMS ===
 ${itemsText}`;
 }
+
+// Polish/English writing rules + unit normalisation shared by every bilingual
+// compile prompt (legacy sectioned digest, daily edition, weekly edition).
+const BILINGUAL_RULES = `## LANGUAGE & TRANSLATION RULES
+
+You are producing both English AND Polish in the same response. The Polish field is NOT a downstream translation — write it as a Polish journalist would, directly from the source material:
+
+- Polish prose should read naturally to a native speaker — proper grammar, declensions, idiom; not literal calques from English
+- Quotes can stay in their original language if appropriate; otherwise paraphrase faithfully
+- Source names in markdown links: keep media outlet names in the original ("The Guardian", "France 24", "Al Jazeera") — do NOT translate them
+- Country/category/section labels are translated by code, not by you — focus on prose
+- Polish numerical conventions: comma as decimal separator ("3,6 mln"), space as thousands separator ("500 000"), "mln" / "mld" instead of "million" / "billion" written out (in PL only — keep English form in the .en field)
+- Proper nouns: keep original spelling unless a widely-accepted Polish form exists ("Stany Zjednoczone", "Wielka Brytania", "Cypr")
+- Emoji and markdown formatting: preserved identically across languages
+
+## UNIT NORMALIZATION (apply to BOTH .en and .pl)
+
+The audience is Polish/European. Convert non-metric and South-Asian units before writing:
+
+- **South Asian numbering → international**: "crore" = 10,000,000; "lakh" = 100,000. "3.6 crore voters" → English: "36 million voters", Polish: "36 mln wyborców". Never leave "crore" or "lakh" in either language.
+- **Imperial → metric**: miles→km (×1.609), feet→m (×0.3048), inches→cm (×2.54), pounds→kg (×0.4536), ounces→g (×28.35), gallons→litres (×3.785), °F→°C ((F−32)×5/9). Round sensibly: 1 decimal max for most; no decimal for distances >10 km.
+- **Currency**: leave native currency, add USD or EUR equivalent in parentheses for less-familiar currencies (INR, PKR, PHP, NGN, IDR, BDT, LKR, EGP, KES, ZAR, ARS, BRL, MXN, VND...). Example: "500,000 rupees (~$6,000)". Do NOT convert USD, EUR, GBP, PLN.
+- **English written form**: "36 million", "500,000", "2.5 billion". **Polish written form**: "36 mln", "500 000", "2,5 mld".`;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Structured compilation prompt — single Sonnet call producing EN+PL output.
@@ -495,26 +522,7 @@ Every body and tldr MUST end with at least one inline markdown link to the sourc
 
 The tldr only needs to cite the single primary source.
 
-## LANGUAGE & TRANSLATION RULES
-
-You are producing both English AND Polish in the same response. The Polish field is NOT a downstream translation — write it as a Polish journalist would, directly from the source material:
-
-- Polish prose should read naturally to a native speaker — proper grammar, declensions, idiom; not literal calques from English
-- Quotes can stay in their original language if appropriate; otherwise paraphrase faithfully
-- Source names in markdown links: keep media outlet names in the original ("The Guardian", "France 24", "Al Jazeera") — do NOT translate them
-- Country/category/section labels are translated by code, not by you — focus on prose
-- Polish numerical conventions: comma as decimal separator ("3,6 mln"), space as thousands separator ("500 000"), "mln" / "mld" instead of "million" / "billion" written out (in PL only — keep English form in the .en field)
-- Proper nouns: keep original spelling unless a widely-accepted Polish form exists ("Stany Zjednoczone", "Wielka Brytania", "Cypr")
-- Emoji and markdown formatting: preserved identically across languages
-
-## UNIT NORMALIZATION (apply to BOTH .en and .pl)
-
-The audience is Polish/European. Convert non-metric and South-Asian units before writing:
-
-- **South Asian numbering → international**: "crore" = 10,000,000; "lakh" = 100,000. "3.6 crore voters" → English: "36 million voters", Polish: "36 mln wyborców". Never leave "crore" or "lakh" in either language.
-- **Imperial → metric**: miles→km (×1.609), feet→m (×0.3048), inches→cm (×2.54), pounds→kg (×0.4536), ounces→g (×28.35), gallons→litres (×3.785), °F→°C ((F−32)×5/9). Round sensibly: 1 decimal max for most; no decimal for distances >10 km.
-- **Currency**: leave native currency, add USD or EUR equivalent in parentheses for less-familiar currencies (INR, PKR, PHP, NGN, IDR, BDT, LKR, EGP, KES, ZAR, ARS, BRL, MXN, VND...). Example: "500,000 rupees (~$6,000)". Do NOT convert USD, EUR, GBP, PLN.
-- **English written form**: "36 million", "500,000", "2.5 billion". **Polish written form**: "36 mln", "500 000", "2,5 mld".
+${BILINGUAL_RULES}
 
 ## MARKETS / MACRO PROSE
 
@@ -548,4 +556,157 @@ ${gapsJson}
 
 === MARKET DATA ===
 ${marketsJson}`;
+}
+
+// ==============================================================================
+// EDITORIAL EDITIONS — daily quick-hit + Saturday weekly (see src/editorial.ts)
+// ==============================================================================
+
+const READER = `The readers are Polish — most live in Poland; the editor lives in Pegeia, Cyprus. They are well informed and busy, and they read this instead of scrolling news sites. They want what genuinely matters in the world and in Poland, and they want to know when outlets in different parts of the world tell the same story differently. Poland-related news (Polish politics, the economy, security, Polish teams and athletes, extreme weather in Poland) can matter more to them than a bigger event far away. Cyprus and Nepal are NOT priority countries — mention them only when something major happens there.`;
+
+function clip(text: string, max: number): string {
+  const flat = (text || '').replace(/\s+/g, ' ').trim();
+  return flat.length > max ? flat.slice(0, max - 1) + '…' : flat;
+}
+
+// Compact, model-facing view of one cluster: the signals the ranker used plus
+// each outlet's own headline/summary, so the model can both judge importance
+// and describe how coverage differed.
+function renderClusterForPrompt(c: StoryCluster, maxItems: number, summaryChars: number): string {
+  const head =
+    `[${c.id}] ${c.importance} · score ${c.score} · ${c.outletCount} outlet(s) / ${c.regionCount} region(s)` +
+    ` · countries: ${c.country_tags.join(',') || '-'} · categories: ${c.category_tags.join(',') || '-'}\n` +
+    `  event: ${c.event}`;
+  const lines = c.items.slice(0, maxItems).map(it =>
+    `  - ${it.source} (${REGION_LABELS[it.region] ?? it.region}): "${clip(it.headline, 160)}" — ${clip(it.summary, summaryChars)}`,
+  );
+  if (c.items.length > maxItems) {
+    lines.push(`  - …also covered by: ${c.items.slice(maxItems).map(it => it.source).join(', ')}`);
+  }
+  return [head, ...lines].join('\n');
+}
+
+/**
+ * Editorial clustering: group one day's candidate items into real-world
+ * events so a story covered by six outlets becomes ONE story with six
+ * sources, instead of six near-duplicates or one arbitrary pick.
+ */
+export function buildClusterPrompt(items: { source: string; event: string; headline: string }[]): string {
+  const lines = items.map((it, i) => `[${i}] ${it.source} | ${clip(it.event, 140)} | ${clip(it.headline, 140)}`).join('\n');
+  return `Below are ${items.length} news items from one day, from outlets all over the world. Each line is: [index] outlet | event description | original headline.
+
+Group the items that report the SAME specific real-world event, so the digest can present each event once with every outlet that covered it.
+
+Same event (group them):
+- The same incident, decision, vote, ruling, election result, match, death, report or announcement — even when outlets cover different angles (casualties vs. diplomatic reaction vs. analysis of that same event), use different wording, or write in different languages.
+- Follow-ups centred on the same news moment ("X happens", "Y reacts to X", "what X means").
+
+Different events (keep apart):
+- Two separate actions by the same actor (two unrelated statements by the same president).
+- Different incidents in the same broad topic (two different strikes in the same war on different targets, two unrelated climate protests). For a war, group by specific development, not the whole war.
+
+Output: {"groups": [{"label": "...", "items": [i, j, ...]}, ...]}
+- Emit only groups with two or more items; an item that matches nothing is left out.
+- Each index appears in at most one group.
+- "label" is a canonical English line for the event, max 15 words: who did what, where.
+
+=== ITEMS ===
+${lines}`;
+}
+
+/**
+ * Daily quick-hit edition. The model receives ~40 ranked candidate clusters
+ * and acts as the editor: it decides which stories run, which sections exist
+ * today, and in what order — then writes them in English and Polish. Source
+ * links are attached in code from the cluster, so bodies carry no links.
+ */
+export function buildDailyEditionPrompt(
+  candidates: StoryCluster[],
+  weather: WeatherData[],
+  markets: MarketData,
+  date: string,
+): string {
+  const candidatesText = candidates.map(c => renderClusterForPrompt(c, 5, 220)).join('\n\n');
+  return `You are the editor of a daily news briefing published on ${date}. ${READER}
+
+The daily is a QUICK HIT: a five-minute read. Fewer, better stories beat a long list.
+
+Below are today's candidate stories. Each candidate is ONE real-world event, already grouped across outlets, with: an id, the importance tag from triage, a coverage score (higher = more outlets in more parts of the world), country/category tags, and each outlet's own headline and summary.
+
+## YOUR JOB
+
+1. Choose the stories. Ask of each: "Would a well-informed Polish reader want to know this today?" Prefer events covered by several outlets. Skip local noise from anywhere — including Poland. Never invent stories; use only the candidates below, each at most once, by exact id.
+2. Decide the sections and their order. The order is yours and should change with the news:
+   - "top" — ALWAYS first. 4–6 stories: the most important events of the day for this reader, from any country (Poland included).
+   - "poland" — 2–5 notable Polish stories not already in "top". Include it whenever there is notable Polish news; skip trivia (sector op-eds, local accidents, minor court cases). Put it right after "top" on a big Polish news day, lower on a quiet one.
+   - "world" — 3–6 other notable events, for geographic breadth beyond "top".
+   - "business", "science_tech" — only when there is something genuinely notable (1–4 each).
+   - "sports" — only major sporting events: finals, title deciders, Champions League nights, Grand Slams, F1, Olympics — and Polish teams or athletes, who come first. 1–4 stories. Skip routine league games. On a big sporting day (a Polish win, a major final) move it up.
+   - "culture" — only notable items: major prizes, landmark releases, deaths of icons, notable Polish culture. 1–3 stories.
+   Omit any section with nothing worth reading. Aim for 14–20 stories in total.
+3. Write each story:
+   - headline: a clear, specific title (plain text, no markdown).
+   - body: "top" and "poland" stories — 2–3 sentences: what happened, the key facts and numbers, why it matters. Other sections — 1–2 sentences; sports stories should be a vivid summary (result, who, why it matters). Plain prose: no links, no source citations, no markdown — the code appends the list of outlets.
+   - coverage: ONE sentence on how outlets framed the event differently, naming them — e.g. "TASS presented the strike as retaliation for Ukrainian attacks, while BBC and Ukrainska Pravda focused on the civilian death toll." Base it only on the outlet summaries shown. Use empty strings when the candidate has a single outlet or when coverage is essentially the same everywhere. Never manufacture a difference.
+4. weatherAlert: look at the 3-day forecast below (and any weather news among the candidates). If Poland is in for a dramatic change — a temperature swing of roughly 8°C or more, first frost or snow, a storm, a heatwave — write one sentence about it. Same for Pegeia only if extreme. Otherwise empty strings.
+5. marketNote: 1–2 sentences on what the market data shows (and any market-moving candidate story). Empty strings if nothing notable.
+
+${BILINGUAL_RULES}
+
+## FORMAT RULES
+
+- No markdown blockquotes (\`>\`) and no markdown links anywhere — code renders links.
+- Polish inline quotations: „…”. English: "…".
+- Every text field is an object with "en" and "pl".
+
+=== CANDIDATE STORIES (sorted by coverage score) ===
+${candidatesText}
+
+=== WEATHER (3-day forecast) ===
+${JSON.stringify(weather)}
+
+=== MARKET DATA ===
+${JSON.stringify(markets)}`;
+}
+
+/**
+ * Saturday weekly edition. Input is the week's ranked clusters, day by day.
+ * The model links them into week-long storylines, picks the 10–12 that
+ * mattered most, and narrates how each developed and how outlets differed.
+ */
+export function buildWeeklyEditionPrompt(days: { newsDay: string; clusters: StoryCluster[] }[]): string {
+  const daysText = days.map(d => {
+    const label = new Date(d.newsDay + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+    return `##### ${label} (news day ${d.newsDay})\n\n${d.clusters.map(c => renderClusterForPrompt(c, 3, 160)).join('\n\n')}`;
+  }).join('\n\n');
+  const first = days[0]?.newsDay ?? '';
+  const last = days[days.length - 1]?.newsDay ?? '';
+  return `You are the editor of a Saturday weekly review covering the news from ${first} to ${last}. ${READER}
+
+Below are the week's candidate stories, day by day. Each candidate is ONE event from one day, already grouped across outlets, with an id, triage importance, a coverage score (higher = more outlets in more regions), country/category tags, and each outlet's own headline and summary. Many week-long storylines appear on several days as separate candidates — for example a peace process with talks on Monday, a breakthrough on Wednesday and a setback on Friday.
+
+## YOUR JOB
+
+1. Link candidates into storylines that span the week.
+2. Pick the 10–12 storylines that mattered most this week for this reader. Weigh: how important the events were, how widely they were covered, and how much they moved during the week. Include the 2–3 most important Polish storylines if the week had notable Polish news. Include a sporting storyline only if something major happened (and Polish achievements count for more). Cyprus or Nepal only if something major happened there.
+3. Order them by importance, most important first.
+4. For each storyline write:
+   - ids: EVERY candidate id the storyline draws on (all days). Use exact ids from the list.
+   - headline: a clear title for the storyline (plain text).
+   - narrative: 2–3 short paragraphs (120–200 words in total), separated by a blank line ("\\n\\n"). Tell it as a story: where it stood at the start of the week, what changed, where it stands now, and why it matters to the reader. Concrete facts and numbers. No links, no markdown.
+   - timeline: 2–5 key moments in date order. "day" is the news day (YYYY-MM-DD) of that development; "text" is one short sentence.
+   - coverage: 1–2 sentences on how outlets in different regions covered the storyline differently — framing, emphasis, blame, numbers, what state media stressed or left out — naming the outlets. Base it only on the summaries shown. Use empty strings if coverage was essentially uniform.
+5. alsoThisWeek: 5–8 further notable events that did not make the main list — one sentence each, with a short headline and the candidate ids.
+6. intro: 3–4 sentences giving the shape of the week — the big themes, written for someone who missed the news entirely.
+
+${BILINGUAL_RULES}
+
+## FORMAT RULES
+
+- No markdown blockquotes (\`>\`), no markdown links, no bold markers — code renders headings, timelines and source lists.
+- Polish inline quotations: „…”. English: "…".
+- Every text field is an object with "en" and "pl".
+
+=== THE WEEK'S CANDIDATE STORIES ===
+${daysText}`;
 }

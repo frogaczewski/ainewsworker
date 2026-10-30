@@ -2,153 +2,183 @@ import type { RssFeedConfig, WeatherLocation, MarketTicker, CurrencyPair } from 
 
 export const RSS_FEEDS: RssFeedConfig[] = [
   // Global / Centrist-Institutional
-  { name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml', category: 'global' },
-  { name: 'BBC Business', url: 'https://feeds.bbci.co.uk/news/business/rss.xml', category: 'business' },
-  { name: 'BBC Technology', url: 'https://feeds.bbci.co.uk/news/technology/rss.xml', category: 'tech' },
-  { name: 'BBC Science', url: 'https://feeds.bbci.co.uk/news/science_and_environment/rss.xml', category: 'science' },
-  { name: 'France 24', url: 'https://www.france24.com/en/rss', category: 'global' },
-  { name: 'DW', url: 'https://rss.dw.com/rdf/rss-en-all', category: 'global' },
-  { name: 'NPR World', url: 'https://feeds.npr.org/1004/rss.xml', category: 'global' },
-  { name: 'ABC Australia', url: 'https://www.abc.net.au/news/feed/2942460/rss.xml', category: 'global' },
-  { name: 'Globe and Mail', url: 'https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/world/', category: 'global' },
+  { name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml', category: 'global', region: 'UK' },
+  { name: 'BBC Business', url: 'https://feeds.bbci.co.uk/news/business/rss.xml', category: 'business', region: 'UK' },
+  { name: 'BBC Technology', url: 'https://feeds.bbci.co.uk/news/technology/rss.xml', category: 'tech', region: 'UK' },
+  { name: 'BBC Science', url: 'https://feeds.bbci.co.uk/news/science_and_environment/rss.xml', category: 'science', region: 'UK' },
+  { name: 'France 24', url: 'https://www.france24.com/en/rss', category: 'global', region: 'EU' },
+  { name: 'DW', url: 'https://rss.dw.com/rdf/rss-en-all', category: 'global', region: 'EU' },
+  { name: 'NPR World', url: 'https://feeds.npr.org/1004/rss.xml', category: 'global', region: 'NAM' },
+  { name: 'ABC Australia', url: 'https://www.abc.net.au/news/feed/2942460/rss.xml', category: 'global', region: 'AU' },
+  { name: 'Globe and Mail', url: 'https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/world/', category: 'global', region: 'NAM' },
 
   // Western / Liberal-Leaning
-  { name: 'The Guardian World', url: 'https://www.theguardian.com/world/rss', category: 'global' },
-  { name: 'The Guardian Science', url: 'https://www.theguardian.com/science/rss', category: 'science' },
-  { name: 'NPR News', url: 'https://feeds.npr.org/1002/rss.xml', category: 'global' },
-  { name: 'ProPublica', url: 'https://feeds.propublica.org/propublica/main', category: 'global', editorial: true },
-  { name: 'Democracy Now', url: 'https://www.democracynow.org/democracynow.rss', category: 'global' },
+  { name: 'The Guardian World', url: 'https://www.theguardian.com/world/rss', category: 'global', region: 'UK' },
+  { name: 'The Guardian Science', url: 'https://www.theguardian.com/science/rss', category: 'science', region: 'UK' },
+  { name: 'NPR News', url: 'https://feeds.npr.org/1002/rss.xml', category: 'global', region: 'NAM' },
+  { name: 'ProPublica', url: 'https://feeds.propublica.org/propublica/main', category: 'global', editorial: true, region: 'NAM' },
+  { name: 'Democracy Now', url: 'https://www.democracynow.org/democracynow.rss', category: 'global', region: 'NAM' },
 
   // Middle East & Gulf
-  { name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', category: 'global' },
-  { name: 'Middle East Eye', url: 'https://www.middleeasteye.net/rss', category: 'global' },
-  { name: 'Khaleej Times', url: 'https://www.khaleejtimes.com/rss', category: 'global' },
-  { name: 'Jerusalem Post', url: 'https://www.jpost.com/rss/rssfeedsfrontpage.aspx', category: 'global' },
+  { name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml', category: 'global', region: 'MENA' },
+  { name: 'Middle East Eye', url: 'https://www.middleeasteye.net/rss', category: 'global', region: 'MENA' },
+  { name: 'Khaleej Times', url: 'https://www.khaleejtimes.com/rss', category: 'global', region: 'MENA' },
+  { name: 'Jerusalem Post', url: 'https://www.jpost.com/rss/rssfeedsfrontpage.aspx', category: 'global', region: 'MENA' },
 
   // Iran
-  { name: 'Press TV', url: 'https://www.presstv.ir/RSS', category: 'global' },
+  { name: 'Press TV', url: 'https://www.presstv.ir/RSS', category: 'global', region: 'MENA' },
 
   // Saudi Arabia — covered by Gulf News above
 
   // Turkey
-  { name: 'Daily Sabah', url: 'https://www.dailysabah.com/rssFeed/Home', category: 'global' },
+  { name: 'Daily Sabah', url: 'https://www.dailysabah.com/rssFeed/Home', category: 'global', region: 'MENA' },
 
   // Chinese State / Perspective
-  { name: 'Xinhua', url: 'http://www.news.cn/english/rss/worldnews.xml', category: 'global' },
-  { name: 'SCMP', url: 'https://www.scmp.com/rss/4/feed', category: 'global' },
+  { name: 'Xinhua', url: 'http://www.news.cn/english/rss/worldnews.xml', category: 'global', region: 'CN' },
+  { name: 'SCMP', url: 'https://www.scmp.com/rss/4/feed', category: 'global', region: 'CN' },
 
   // Russian Perspective
-  { name: 'TASS', url: 'https://tass.com/rss/v2.xml', category: 'global' },
-  { name: 'Meduza', url: 'https://meduza.io/rss/en/all', category: 'global' },
-  { name: 'Moscow Times', url: 'https://www.themoscowtimes.com/rss/news', category: 'global' },
+  { name: 'TASS', url: 'https://tass.com/rss/v2.xml', category: 'global', region: 'RU' },
+  { name: 'Meduza', url: 'https://meduza.io/rss/en/all', category: 'global', region: 'RU' },
+  { name: 'Moscow Times', url: 'https://www.themoscowtimes.com/rss/news', category: 'global', region: 'RU' },
 
   // Ukraine
-  { name: 'Ukrinform', url: 'https://www.ukrinform.net/rss/block-lastnews', category: 'global' },
-  { name: 'Ukrainska Pravda', url: 'https://www.pravda.com.ua/eng/rss/', category: 'global' },
+  { name: 'Ukrinform', url: 'https://www.ukrinform.net/rss/block-lastnews', category: 'global', region: 'UA' },
+  { name: 'Ukrainska Pravda', url: 'https://www.pravda.com.ua/eng/rss/', category: 'global', region: 'UA' },
 
   // South Asia
-  { name: 'Times of India', url: 'https://timesofindia.indiatimes.com/rssfeedstopstories.cms', category: 'global' },
-  { name: 'The Hindu', url: 'https://www.thehindu.com/news/international/feeder/default.rss', category: 'global' },
-  { name: 'Dawn (Pakistan)', url: 'https://www.dawn.com/feeds/home', category: 'global' },
-  { name: 'NDTV', url: 'https://feeds.feedburner.com/ndtvnews-top-stories', category: 'global' },
+  { name: 'Times of India', url: 'https://timesofindia.indiatimes.com/rssfeedstopstories.cms', category: 'global', region: 'SA' },
+  { name: 'The Hindu', url: 'https://www.thehindu.com/news/international/feeder/default.rss', category: 'global', region: 'SA' },
+  { name: 'Dawn (Pakistan)', url: 'https://www.dawn.com/feeds/home', category: 'global', region: 'SA' },
+  { name: 'NDTV', url: 'https://feeds.feedburner.com/ndtvnews-top-stories', category: 'global', region: 'SA' },
 
   // Southeast Asia
-  { name: 'Bangkok Post', url: 'https://www.bangkokpost.com/rss/data/topstories.xml', category: 'global' },
-  { name: 'Rappler', url: 'https://www.rappler.com/feed/', category: 'global' },
-  { name: 'Channel News Asia', url: 'https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml', category: 'global' },
-  { name: 'VnExpress Intl', url: 'https://e.vnexpress.net/rss/news.rss', category: 'global' },
+  { name: 'Bangkok Post', url: 'https://www.bangkokpost.com/rss/data/topstories.xml', category: 'global', region: 'SEA' },
+  { name: 'Rappler', url: 'https://www.rappler.com/feed/', category: 'global', region: 'SEA' },
+  { name: 'Channel News Asia', url: 'https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml', category: 'global', region: 'SEA' },
+  { name: 'VnExpress Intl', url: 'https://e.vnexpress.net/rss/news.rss', category: 'global', region: 'SEA' },
 
   // East Asia
-  { name: 'Nikkei Asia', url: 'https://asia.nikkei.com/rss/feed/nar', category: 'business' },
-  { name: 'Japan Times', url: 'https://www.japantimes.co.jp/feed/', category: 'global' },
-  { name: 'Yonhap News', url: 'https://en.yna.co.kr/RSS/news.xml', category: 'global' },
+  { name: 'Nikkei Asia', url: 'https://asia.nikkei.com/rss/feed/nar', category: 'business', region: 'EA' },
+  { name: 'Japan Times', url: 'https://www.japantimes.co.jp/feed/', category: 'global', region: 'EA' },
+  { name: 'Yonhap News', url: 'https://en.yna.co.kr/RSS/news.xml', category: 'global', region: 'EA' },
 
   // Africa
-  { name: 'Daily Maverick', url: 'https://www.dailymaverick.co.za/dmrss/', category: 'global' },
-  { name: 'AllAfrica', url: 'https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf', category: 'global' },
-  { name: 'Nation Africa', url: 'https://nation.africa/kenya/rss.xml', category: 'global' },
-  { name: 'Mail & Guardian', url: 'https://mg.co.za/feed/', category: 'global' },
-  { name: 'Mada Masr', url: 'https://www.madamasr.com/en/feed/', category: 'global' },
-  { name: 'Premium Times', url: 'https://www.premiumtimesng.com/feed', category: 'global' },
-  { name: 'The Punch', url: 'https://punchng.com/feed/', category: 'global' },
-  { name: 'African Arguments', url: 'https://africanarguments.org/feed/', category: 'global', editorial: true },
-  { name: 'Radio Dabanga', url: 'https://www.dabangasudan.org/en/all-news/feed', category: 'global' },
+  { name: 'Daily Maverick', url: 'https://www.dailymaverick.co.za/dmrss/', category: 'global', region: 'AF' },
+  { name: 'AllAfrica', url: 'https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf', category: 'global', region: 'AF' },
+  { name: 'Nation Africa', url: 'https://nation.africa/kenya/rss.xml', category: 'global', region: 'AF' },
+  { name: 'Mail & Guardian', url: 'https://mg.co.za/feed/', category: 'global', region: 'AF' },
+  { name: 'Mada Masr', url: 'https://www.madamasr.com/en/feed/', category: 'global', region: 'MENA' },
+  { name: 'Premium Times', url: 'https://www.premiumtimesng.com/feed', category: 'global', region: 'AF' },
+  { name: 'The Punch', url: 'https://punchng.com/feed/', category: 'global', region: 'AF' },
+  { name: 'African Arguments', url: 'https://africanarguments.org/feed/', category: 'global', editorial: true, region: 'AF' },
+  { name: 'Radio Dabanga', url: 'https://www.dabangasudan.org/en/all-news/feed', category: 'global', region: 'AF' },
 
   // Latin America
-  { name: 'MercoPress', url: 'https://en.mercopress.com/rss', category: 'global' },
-  { name: 'Tico Times', url: 'https://ticotimes.net/feed', category: 'global' },
-  { name: 'Infobae', url: 'https://www.infobae.com/feeds/rss/', category: 'global' },
-  { name: 'O Globo', url: 'https://oglobo.globo.com/rss/oglobo.xml', category: 'global' },
-  { name: 'CIPER Chile', url: 'https://www.ciperchile.cl/feed/', category: 'global', editorial: true },
-  { name: 'El País América', url: 'https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/america/portada', category: 'global' },
+  { name: 'MercoPress', url: 'https://en.mercopress.com/rss', category: 'global', region: 'LATAM' },
+  { name: 'Tico Times', url: 'https://ticotimes.net/feed', category: 'global', region: 'LATAM' },
+  { name: 'Infobae', url: 'https://www.infobae.com/feeds/rss/', category: 'global', region: 'LATAM' },
+  { name: 'O Globo', url: 'https://oglobo.globo.com/rss/oglobo.xml', category: 'global', region: 'LATAM' },
+  { name: 'CIPER Chile', url: 'https://www.ciperchile.cl/feed/', category: 'global', editorial: true, region: 'LATAM' },
+  { name: 'El País América', url: 'https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/america/portada', category: 'global', region: 'LATAM' },
 
   // Central Asia
-  { name: 'The Diplomat', url: 'https://thediplomat.com/feed/', category: 'global' },
-  { name: 'CABAR.asia', url: 'https://cabar.asia/en/feed', category: 'global' },
-  { name: 'The Astana Times', url: 'https://astanatimes.com/feed/', category: 'global' },
+  { name: 'The Diplomat', url: 'https://thediplomat.com/feed/', category: 'global', region: 'INTL' },
+  { name: 'CABAR.asia', url: 'https://cabar.asia/en/feed', category: 'global', region: 'CAS' },
+  { name: 'The Astana Times', url: 'https://astanatimes.com/feed/', category: 'global', region: 'CAS' },
 
   // Europe / EU
-  { name: 'Politico EU', url: 'https://www.politico.eu/feed/', category: 'politics' },
-  { name: 'El País', url: 'https://feeds.elpais.com/mrss-s/pages/ep/site/english.elpais.com/portada', category: 'global' },
-  { name: 'Euronews', url: 'https://www.euronews.com/rss', category: 'global' },
+  { name: 'Politico EU', url: 'https://www.politico.eu/feed/', category: 'politics', region: 'EU' },
+  { name: 'El País', url: 'https://feeds.elpais.com/mrss-s/pages/ep/site/english.elpais.com/portada', category: 'global', region: 'EU' },
+  { name: 'Euronews', url: 'https://www.euronews.com/rss', category: 'global', region: 'EU' },
 
   // Poland
-  { name: 'Gazeta Wyborcza', url: 'https://rss.gazeta.pl/pub/rss/gazetawyborcza_kraj.xml', category: 'poland' },
-  { name: 'Rzeczpospolita', url: 'https://www.rp.pl/rss_main', category: 'poland' },
-  { name: 'Notes From Poland', url: 'https://notesfrompoland.com/feed/', category: 'poland' },
+  { name: 'Gazeta Wyborcza', url: 'https://rss.gazeta.pl/pub/rss/gazetawyborcza_kraj.xml', category: 'poland', region: 'PL' },
+  { name: 'Rzeczpospolita', url: 'https://www.rp.pl/rss_main', category: 'poland', region: 'PL' },
+  { name: 'Notes From Poland', url: 'https://notesfrompoland.com/feed/', category: 'poland', region: 'PL' },
 
   // Nepal
-  { name: 'Kathmandu Post', url: 'https://kathmandupost.com/rss', category: 'nepal' },
-  { name: 'OnlineKhabar', url: 'https://english.onlinekhabar.com/feed', category: 'nepal' },
+  { name: 'Kathmandu Post', url: 'https://kathmandupost.com/rss', category: 'nepal', region: 'SA' },
+  { name: 'OnlineKhabar', url: 'https://english.onlinekhabar.com/feed', category: 'nepal', region: 'SA' },
 
   // Cyprus
-  { name: 'Cyprus Mail', url: 'https://cyprus-mail.com/feed/', category: 'cyprus' },
+  { name: 'Cyprus Mail', url: 'https://cyprus-mail.com/feed/', category: 'cyprus', region: 'CY' },
 
   // Technology & AI
-  { name: 'TechCrunch', url: 'https://techcrunch.com/feed/', category: 'tech' },
-  { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml', category: 'tech' },
-  { name: 'Wired', url: 'https://www.wired.com/feed/rss', category: 'tech' },
-  { name: 'Rest of World', url: 'https://restofworld.org/feed/latest', category: 'tech' },
+  { name: 'TechCrunch', url: 'https://techcrunch.com/feed/', category: 'tech', region: 'NAM' },
+  { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml', category: 'tech', region: 'NAM' },
+  { name: 'Wired', url: 'https://www.wired.com/feed/rss', category: 'tech', region: 'NAM' },
+  { name: 'Rest of World', url: 'https://restofworld.org/feed/latest', category: 'tech', region: 'INTL' },
 
   // Science
-  { name: 'Science Daily', url: 'https://www.sciencedaily.com/rss/all.xml', category: 'science' },
-  { name: 'Nature News', url: 'https://www.nature.com/nature.rss', category: 'science' },
+  { name: 'Science Daily', url: 'https://www.sciencedaily.com/rss/all.xml', category: 'science', region: 'NAM' },
+  { name: 'Nature News', url: 'https://www.nature.com/nature.rss', category: 'science', region: 'UK' },
 
   // Health
-  { name: 'STAT News', url: 'https://www.statnews.com/feed/', category: 'health' },
-  { name: 'WHO News', url: 'https://www.who.int/rss-feeds/news-english.xml', category: 'health' },
+  { name: 'STAT News', url: 'https://www.statnews.com/feed/', category: 'health', region: 'NAM' },
+  { name: 'WHO News', url: 'https://www.who.int/rss-feeds/news-english.xml', category: 'health', region: 'INTL' },
 
   // Editorial / Investigative / Open-Source (non-paywalled)
-  { name: 'Bellingcat', url: 'https://www.bellingcat.com/feed/', category: 'editorial', editorial: true },
-  { name: 'The Conversation', url: 'https://theconversation.com/articles.atom', category: 'editorial', editorial: true },
-  { name: 'The Intercept', url: 'https://theintercept.com/feed/?rss', category: 'editorial', editorial: true },
-  { name: 'Global Voices', url: 'https://globalvoices.org/feed/', category: 'editorial', editorial: true },
-  { name: 'Carbon Brief', url: 'https://www.carbonbrief.org/feed', category: 'editorial', editorial: true },
-  { name: 'The Markup', url: 'https://themarkup.org/feeds/rss.xml', category: 'editorial', editorial: true },
-  { name: 'ICIJ', url: 'https://www.icij.org/feed/', category: 'editorial', editorial: true },
-  { name: 'Mongabay', url: 'https://news.mongabay.com/feed/', category: 'editorial', editorial: true },
-  { name: 'OCCRP', url: 'https://www.occrp.org/en/feed', category: 'editorial', editorial: true },
+  { name: 'Bellingcat', url: 'https://www.bellingcat.com/feed/', category: 'editorial', editorial: true, region: 'EU' },
+  { name: 'The Conversation', url: 'https://theconversation.com/articles.atom', category: 'editorial', editorial: true, region: 'INTL' },
+  { name: 'The Intercept', url: 'https://theintercept.com/feed/?rss', category: 'editorial', editorial: true, region: 'NAM' },
+  { name: 'Global Voices', url: 'https://globalvoices.org/feed/', category: 'editorial', editorial: true, region: 'INTL' },
+  { name: 'Carbon Brief', url: 'https://www.carbonbrief.org/feed', category: 'editorial', editorial: true, region: 'UK' },
+  { name: 'The Markup', url: 'https://themarkup.org/feeds/rss.xml', category: 'editorial', editorial: true, region: 'NAM' },
+  { name: 'ICIJ', url: 'https://www.icij.org/feed/', category: 'editorial', editorial: true, region: 'INTL' },
+  { name: 'Mongabay', url: 'https://news.mongabay.com/feed/', category: 'editorial', editorial: true, region: 'INTL' },
+  { name: 'OCCRP', url: 'https://www.occrp.org/en/feed', category: 'editorial', editorial: true, region: 'INTL' },
 
   // Sports — Worldwide
-  { name: 'BBC Sport', url: 'https://feeds.bbci.co.uk/sport/rss.xml', category: 'sports' },
-  { name: 'ESPN', url: 'https://www.espn.com/espn/rss/news', category: 'sports' },
-  { name: 'Sky Sports', url: 'https://www.skysports.com/rss/12040', category: 'sports' },
-  { name: 'The Guardian Sport', url: 'https://www.theguardian.com/uk/sport/rss', category: 'sports' },
-  { name: 'Marca English', url: 'https://www.marca.com/en/rss/portada.xml', category: 'sports' },
+  { name: 'BBC Sport', url: 'https://feeds.bbci.co.uk/sport/rss.xml', category: 'sports', region: 'UK' },
+  { name: 'ESPN', url: 'https://www.espn.com/espn/rss/news', category: 'sports', region: 'NAM' },
+  { name: 'Sky Sports', url: 'https://www.skysports.com/rss/12040', category: 'sports', region: 'UK' },
+  { name: 'The Guardian Sport', url: 'https://www.theguardian.com/uk/sport/rss', category: 'sports', region: 'UK' },
+  { name: 'Marca English', url: 'https://www.marca.com/en/rss/portada.xml', category: 'sports', region: 'EU' },
 
   // Culture — Polish & Worldwide
-  { name: 'BBC Culture', url: 'https://www.bbc.com/culture/feed.rss', category: 'culture' },
-  { name: 'The Guardian Culture', url: 'https://www.theguardian.com/culture/rss', category: 'culture' },
-  { name: 'Artnet News', url: 'https://news.artnet.com/feed', category: 'culture' },
-  { name: 'Culture.pl', url: 'https://culture.pl/en/rss.xml', category: 'culture' },
+  { name: 'BBC Culture', url: 'https://www.bbc.com/culture/feed.rss', category: 'culture', region: 'UK' },
+  { name: 'The Guardian Culture', url: 'https://www.theguardian.com/culture/rss', category: 'culture', region: 'UK' },
+  { name: 'Artnet News', url: 'https://news.artnet.com/feed', category: 'culture', region: 'NAM' },
+  { name: 'Culture.pl', url: 'https://culture.pl/en/rss.xml', category: 'culture', region: 'PL' },
 
   // Economics & Macro
-  { name: 'Reuters Business', url: 'https://www.reutersagency.com/feed/?best-topics=business-finance', category: 'economics' },
-  { name: 'ECB Press', url: 'https://www.ecb.europa.eu/rss/press.html', category: 'economics' },
-  { name: 'Fed News', url: 'https://www.federalreserve.gov/feeds/press_all.xml', category: 'economics' },
-  { name: 'IMF News', url: 'https://www.imf.org/en/News/Rss', category: 'economics' },
-  { name: 'World Bank', url: 'https://www.worldbank.org/en/news/all/rss.xml', category: 'economics' },
+  { name: 'Reuters Business', url: 'https://www.reutersagency.com/feed/?best-topics=business-finance', category: 'economics', region: 'INTL' },
+  { name: 'ECB Press', url: 'https://www.ecb.europa.eu/rss/press.html', category: 'economics', region: 'EU' },
+  { name: 'Fed News', url: 'https://www.federalreserve.gov/feeds/press_all.xml', category: 'economics', region: 'NAM' },
+  { name: 'IMF News', url: 'https://www.imf.org/en/News/Rss', category: 'economics', region: 'INTL' },
+  { name: 'World Bank', url: 'https://www.worldbank.org/en/news/all/rss.xml', category: 'economics', region: 'INTL' },
 ];
+
+// Where each outlet is based. Used by the editorial ranker (src/editorial.ts)
+// to reward stories covered by many outlets from many parts of the world, and
+// by the compile prompts so the model can say "Russian state media framed it
+// as X while British outlets focused on Y".
+export const REGION_LABELS: Record<string, string> = {
+  UK: 'British',
+  EU: 'European',
+  NAM: 'North American',
+  AU: 'Australian',
+  MENA: 'Middle Eastern',
+  CN: 'Chinese',
+  RU: 'Russian',
+  UA: 'Ukrainian',
+  SA: 'South Asian',
+  SEA: 'Southeast Asian',
+  EA: 'East Asian',
+  AF: 'African',
+  LATAM: 'Latin American',
+  CAS: 'Central Asian',
+  PL: 'Polish',
+  CY: 'Cypriot',
+  INTL: 'International',
+};
+
+const SOURCE_REGIONS = new Map(RSS_FEEDS.map(f => [f.name, f.region ?? 'INTL']));
+
+export function regionForSource(source: string): string {
+  return SOURCE_REGIONS.get(source) ?? 'INTL';
+}
 
 export const WEATHER_LOCATIONS: WeatherLocation[] = [
   { name: 'Pegeia, Cyprus', lat: 34.88, lon: 32.38, timezone: 'Asia/Nicosia' },

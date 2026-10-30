@@ -233,7 +233,7 @@ export async function sendDigestEmail(
   const htmlBody = markdownToHtml(markdown);
   const feedStatusHtml = buildFeedStatusFooter(feedStatuses);
   const firstName = to.name.split(' ')[0];
-  const isPolish = subjectOverride?.includes('Codzienny') ?? false;
+  const isPolish = /Codzienny|Przegląd Tygodnia/.test(subjectOverride ?? '');
   const greeting = isPolish ? `☕ Dzień dobry, ${firstName}!` : `☕ Good morning, ${firstName}!`;
   const unsubFooterHtml = buildUnsubFooter(env, unsubToken, isPolish ? 'pl' : 'en');
   const imageHtml = inlineImage

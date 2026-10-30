@@ -13,6 +13,12 @@ cpu_ms = 300000  # 5 minutes — Workers Standard max; pipeline needs >30s defau
 # Set to "false" to fall back to the legacy single-call Sonnet triage path.
 USE_BATCHED_CLASSIFICATION = "true"
 
+# Editorial editions (src/editorial.ts): events are clustered across outlets,
+# ranked by importance + coverage breadth for Polish readers, and written up by
+# Opus as a quick-hit daily (Sun–Fri) or a weekly review (Saturday). Set to
+# "false" to fall back to the legacy fixed-section digest.
+USE_EDITORIAL_EDITIONS = "true"
+
 # A/B variant fan-out. When ENABLE_AB_VARIANTS=true, each enabled config in
 # AB_VARIANT_CONFIGS runs its own classify→compile→send pipeline on the cached
 # RSS items, sending a labelled email to frogaczewski@gmail.com only. Baseline

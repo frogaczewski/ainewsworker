@@ -40,9 +40,12 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-/** Decode XML entities in URLs (e.g. &amp; → &) */
+/** Decode XML entities in URLs (e.g. &amp; → &, WordPress's &#038; → &) */
 function decodeXmlEntities(url: string): string {
-  return url.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+  return url
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
 }
 
 /** Extract image URL from an RSS item using multiple fallback sources */
@@ -107,7 +110,7 @@ function parseRss2Items(xml: string, sourceName: string, maxAgeHours: number): R
     const summary = stripHtml(
       extractTag(itemXml, 'description') || extractTag(itemXml, 'content:encoded')
     );
-    const link = extractTag(itemXml, 'link') || extractAttr(itemXml, 'link', 'href');
+    const link = decodeXmlEntities(extractTag(itemXml, 'link') || extractAttr(itemXml, 'link', 'href'));
     const pubDate = extractTag(itemXml, 'pubDate') || extractTag(itemXml, 'dc:date');
     const imageUrl = extractImageUrl(itemXml);
 
@@ -137,7 +140,7 @@ function parseAtomEntries(xml: string, sourceName: string, maxAgeHours: number):
     const summary = stripHtml(
       extractTag(entryXml, 'summary') || extractTag(entryXml, 'content')
     );
-    const link = extractAttr(entryXml, 'link', 'href') || extractTag(entryXml, 'link');
+    const link = decodeXmlEntities(extractAttr(entryXml, 'link', 'href') || extractTag(entryXml, 'link'));
     const pubDate = extractTag(entryXml, 'published') || extractTag(entryXml, 'updated');
     const imageUrl = extractImageUrl(entryXml);
 

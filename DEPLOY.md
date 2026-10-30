@@ -1,5 +1,46 @@
 # AI News Digest Worker — Operating Manual
 
+## Editions (what gets written)
+
+Since 2026-10-30 the batched pipeline produces **editorial editions**
+(`src/editorial.ts`, `src/edition-render.ts`) instead of the fixed-section
+digest:
+
+- **Daily quick-hit (Sun–Fri)** — 4–6 top stories, then sections the editor
+  chooses and orders per day (Poland, world, business, science & tech, sports,
+  culture), markets, weather. Roughly 15–20 stories.
+- **Weekly review (Saturday)** — replaces Saturday's daily. 10–12 storylines
+  traced across the week (narrative + "how it unfolded" timeline + how outlets
+  covered it differently), an "also this week" list, weather.
+
+How a day's news becomes an edition:
+
+1. **Classify** (Haiku, Stage A batch, structured output). The importance test
+   is *"would a well-informed Polish reader want to know this today?"* — no
+   bonus for merely being about Poland/Cyprus/Nepal; local noise from any
+   country is `low`. Each item also gets a canonical `event` line.
+2. **Cluster** (Opus 5.5, one sync call in Stage B). Items reporting the same
+   event become one cluster carrying every outlet that covered it.
+3. **Rank** in code: importance + distinct outlets (log-scaled) + distinct
+   outlet regions (`region` on each feed in `config.ts`) + Polish relevance;
+   Cyprus/Nepal-only stories sink unless triage called them `high`.
+4. **Write** (Opus 5.5, Stage B batch, structured output). The model gets ~40
+   ranked candidates (each with every outlet's own headline/summary), picks the
+   stories, orders the sections, and writes EN + PL — including a one-line
+   "how it was covered" note when outlets framed the event differently.
+   Every story's list of outlets is rendered in code from the cluster.
+5. Clusters are saved to `clusters:{date}` (14 days). On Saturday, Stage B
+   loads the week (falling back to `phase1:{date}` for days before this
+   pipeline existed) and submits the weekly instead of the daily. With fewer
+   than 4 days of data it sends the daily.
+
+A compile result that errors, is refused, or is truncated is resubmitted once
+on `claude-opus-4-8` (the request is kept at `compile:request:{date}`), then
+the alarm email fires.
+
+Rollback: set `USE_EDITORIAL_EDITIONS = "false"` in `wrangler.toml` and push —
+Stage B goes back to the legacy section-quota digest.
+
 ## Architecture
 
 The pipeline runs in **two phases** connected by a Cloudflare Queue:
@@ -99,7 +140,10 @@ To rotate / set: `wrangler secret put <NAME>`.
   pipeline. `"true"` runs the new Haiku-based batched flow; `"false"` or unset
   runs the legacy single-call Sonnet triage.
 
-To flip the flag: edit `wrangler.toml` and push. (Dashboard override also
+- `USE_EDITORIAL_EDITIONS` — `"true"` (default) writes the daily quick-hit /
+  Saturday weekly editions; `"false"` falls back to the legacy sectioned digest.
+
+To flip a flag: edit `wrangler.toml` and push. (Dashboard override also
 works — the dashboard value wins over the `wrangler.toml` value if both are
 set.)
 
@@ -245,6 +289,10 @@ wrangler kv key get "selected:$(date -u +%Y-%m-%d)" --binding=DIGEST_KV \
 wrangler kv key get "selected:$(date -u +%Y-%m-%d)" --binding=DIGEST_KV \
   | jq '.gaps'
 
+# Today's top event clusters: score, outlets, regions, event
+wrangler kv key get "clusters:$(date -u +%Y-%m-%d)" --binding=DIGEST_KV \
+  | jq -r '.[:20][] | "\(.score)\t\(.outletCount)o/\(.regionCount)r\t\(.event)"'
+
 # Per-batch classification checkpoints (for debugging a stuck retry)
 wrangler kv key list --binding=DIGEST_KV --prefix="classified:batch:$(date -u +%Y-%m-%d)"
 ```
@@ -257,6 +305,8 @@ wrangler kv key list --binding=DIGEST_KV --prefix="classified:batch:$(date -u +%
 | `classified:{date}` | 7 days | Audit the full classified pool |
 | `selected:{date}` | 7 days | Audit which stories were selected into which section |
 | `phase1:{date}` | 7 days | **Full Phase 1 output** — what Phase 2 reads |
+| `clusters:{date}` | 14 days | Ranked event clusters for the day — the Saturday weekly reads the last 7 |
+| `compile:request:{date}` | 7 days | Edition compile request, resubmitted verbatim (on the fallback model) on failure |
 | `digest:latest` | ∞ | Landing-page source |
 | `digest:{date}` | ∞ | Archive; also read by `/resend` |
 | `articles:index` | ∞ | Date index for pagination |

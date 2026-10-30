@@ -113,18 +113,7 @@ async function classifyOneBatch(
   const prompt = buildClassificationPrompt(batch, date);
   // Budget includes room for Haiku 5.5's adaptive thinking.
   const response = await provider.call(env, 'cheap', prompt, 32000);
-  const parsed = parseClassifiedJson(response);
-
-  // Carry imageUrl from RSS item to classified item (prompt doesn't ask for it)
-  const imagesByLink = new Map<string, string>();
-  for (const item of batch) {
-    if (item.imageUrl && item.link) imagesByLink.set(item.link, item.imageUrl);
-  }
-  for (const item of parsed) {
-    if (!item.imageUrl && item.link && imagesByLink.has(item.link)) {
-      item.imageUrl = imagesByLink.get(item.link);
-    }
-  }
+  const parsed = parseClassificationOutput(response, batch);
 
   console.log(`[Classify] Batch ${batchIdx} (${config.id}): classified ${parsed.length}/${batch.length} items`);
 
@@ -173,6 +162,73 @@ export function parseClassifiedJson(response: string): ClassifiedItem[] {
       return [];
     }
   }
+}
+
+// Structured-outputs schema for the classification call (Anthropic
+// `output_config.format`). Mirrors the OUTPUT block of
+// buildClassificationPrompt; the model only emits tags + translations keyed by
+// input index, so the output stays well under max_tokens.
+export const CLASSIFICATION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['items'],
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['i', 'headline', 'summary', 'event', 'importance', 'event_recency', 'country_tags', 'category_tags'],
+        properties: {
+          i: { type: 'integer' },
+          headline: { type: 'string' },
+          summary: { type: 'string' },
+          event: { type: 'string' },
+          importance: { type: 'string', enum: ['high', 'medium', 'low'] },
+          event_recency: { type: 'string', enum: ['current', 'stale_commentary', 'evergreen'] },
+          country_tags: { type: 'array', items: { type: 'string' } },
+          category_tags: { type: 'array', items: { type: 'string' } },
+        },
+      },
+    },
+  },
+} as const;
+
+// Join the model's per-index tags back onto the batch's RSS items. Link,
+// source, pubDate, editorial flag and image always come from the RSS item —
+// never from the model — so a hallucinated or truncated link can't leak into
+// the digest. Accepts both the {"items": [...]} object and a bare array (and
+// the legacy shape that carried `link` instead of `i`).
+export function parseClassificationOutput(response: string, batch: RssItem[]): ClassifiedItem[] {
+  const raw = parseClassifiedJson(response) as unknown as Array<Record<string, unknown>>;
+  const byLink = new Map(batch.map(it => [it.link, it]));
+  const out: ClassifiedItem[] = [];
+  const seen = new Set<number>();
+  for (const r of raw) {
+    let idx = typeof r.i === 'number' ? r.i : -1;
+    if (idx < 0 && typeof r.link === 'string') {
+      const src = byLink.get(r.link);
+      idx = src ? batch.indexOf(src) : -1;
+    }
+    const src = batch[idx];
+    if (!src || seen.has(idx)) continue;
+    seen.add(idx);
+    out.push({
+      headline: typeof r.headline === 'string' && r.headline ? r.headline : src.title,
+      summary: typeof r.summary === 'string' ? r.summary : src.summary.slice(0, 250),
+      source: src.source,
+      link: src.link,
+      pubDate: src.pubDate,
+      country_tags: Array.isArray(r.country_tags) ? (r.country_tags as string[]) : [],
+      category_tags: Array.isArray(r.category_tags) ? (r.category_tags as string[]) : [],
+      importance: r.importance === 'high' || r.importance === 'low' ? r.importance : 'medium',
+      ...(typeof r.event_recency === 'string' && { event_recency: r.event_recency as ClassifiedItem['event_recency'] }),
+      ...(typeof r.event === 'string' && r.event && { event: r.event }),
+      editorial: !!src.editorial,
+      ...(src.imageUrl && { imageUrl: src.imageUrl }),
+    });
+  }
+  return out;
 }
 
 // ==============================================================================

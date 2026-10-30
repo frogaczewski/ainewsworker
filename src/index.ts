@@ -24,9 +24,10 @@ import {
 import type { StructuredDigest } from './types';
 import {
   BATCH_SIZE,
+  CLASSIFICATION_SCHEMA,
   classifyInBatches,
   distributeBySource,
-  parseClassifiedJson,
+  parseClassificationOutput,
   urlDedupAndDropLow,
   semanticDedup,
   selectForDigest,
@@ -41,7 +42,24 @@ import {
   getBatchResults,
   extractText,
   type BatchRequest,
+  type BatchResultRecord,
 } from './providers/anthropic-batch';
+import {
+  CLUSTERS_TTL_SECONDS,
+  EDITORIAL_FALLBACK_MODEL,
+  buildClusters,
+  buildDailyRequest,
+  buildWeeklyRequest,
+  clustersForPersistence,
+  clustersToTriaged,
+  isWeeklyDate,
+  loadWeek,
+  normaliseDailyEdition,
+  normaliseWeeklyEdition,
+  pickDailyCandidates,
+  storyImagesFor,
+} from './editorial';
+import { assembleDailyEdition, assembleWeeklyEdition, weekRangeLabel, type EditionRenderOptions } from './edition-render';
 import { sendDigestEmail, sendErrorEmail, type InlineImage } from './email';
 import { generateDigestImage } from './image';
 import { EMAIL_TO, EMAIL_TO_PL } from './config';
@@ -90,9 +108,11 @@ import type {
   ClassifiedItem,
   Env,
   DigestData,
+  Edition,
   Phase1Output,
   QueueMessage,
   RssItem,
+  StoryCluster,
   SubscriberLang,
 } from './types';
 
@@ -891,8 +911,13 @@ async function runStageA(env: Env, date: string, opts: { testMode?: boolean } = 
         // Room for thinking at high effort plus the ~75-item JSON array (was
         // 12000 on Haiku 4.5). Batches have no HTTP timeout to worry about.
         max_tokens: 64000,
-        output_config: { effort: BATCH_EFFORT },
         messages: [{ role: 'user', content: buildClassificationPrompt(batch, date) }],
+        // Schema-constrained output: no more salvaging truncated / drifted JSON
+        // arrays (parseClassificationOutput still tolerates both shapes).
+        output_config: {
+          effort: BATCH_EFFORT,
+          format: { type: 'json_schema', schema: CLASSIFICATION_SCHEMA },
+        },
       },
     };
   });
@@ -1038,6 +1063,9 @@ async function runStageBCompose(env: Env, date: string, state: ClassifyBatchStat
   const allClassified: ClassifiedItem[] = [];
   let parsedBatches = 0;
   let failedBatches = 0;
+  // Same deterministic split Stage A submitted — the model's output is keyed
+  // by index within its batch.
+  const batches = distributeBySource(state.sortedItems, BATCH_SIZE);
   for (const [customId, batchIdx] of Object.entries(state.customIdToBatchIdx)) {
     const record = results.get(customId);
     if (!record || record.result.type !== 'succeeded') {
@@ -1057,7 +1085,7 @@ async function runStageBCompose(env: Env, date: string, state: ClassifyBatchStat
     }
     try {
       const text = extractText(record);
-      const items = parseClassifiedJson(text);
+      const items = parseClassificationOutput(text, batches[batchIdx] ?? []);
       allClassified.push(...items);
       parsedBatches++;
     } catch (err) {
@@ -1075,6 +1103,12 @@ async function runStageBCompose(env: Env, date: string, state: ClassifyBatchStat
 
   carryImageUrls(allClassified, state.sortedItems);
 
+  if (env.USE_EDITORIAL_EDITIONS !== 'false') {
+    await runStageBEditorial(env, date, state, allClassified);
+    return;
+  }
+
+  // Legacy sectioned digest (USE_EDITORIAL_EDITIONS="false"):
   // URL dedup → semantic dedup (sync Haiku, small) → balance-aware select.
   const urlDeduped = urlDedupAndDropLow(allClassified);
   const fullyDeduped = await semanticDedup(env, BASELINE_CONFIG, urlDeduped);
@@ -1153,6 +1187,215 @@ async function runStageBCompose(env: Env, date: string, state: ClassifyBatchStat
   console.log(`[StageB] Enqueued first poll-compile`);
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Editorial editions (src/editorial.ts): Stage B clusters the day's items into
+// events, ranks them, and submits either the daily quick-hit or — on Saturday —
+// the weekly review as a single Opus structured-output batch request. Stage C
+// renders it with edition-render.ts and sends.
+// ──────────────────────────────────────────────────────────────────────────────
+
+// Below this many days of cluster data the Saturday weekly would be thin;
+// send the daily instead.
+const MIN_WEEKLY_DAYS = 4;
+
+async function runStageBEditorial(
+  env: Env,
+  date: string,
+  state: ClassifyBatchState,
+  classified: ClassifiedItem[],
+): Promise<void> {
+  const clusters = await buildClusters(env, date, classified);
+  console.log(
+    `[StageB] ${clusters.length} event clusters; top 5: ` +
+      clusters.slice(0, 5).map(c => `${c.score} ${c.event} (${c.outletCount} outlets)`).join(' | '),
+  );
+  try {
+    await env.DIGEST_KV.put(`clusters:${date}`, JSON.stringify(clustersForPersistence(clusters)), {
+      expirationTtl: CLUSTERS_TTL_SECONDS,
+    });
+  } catch (err) {
+    console.log(`[StageB] KV write clusters:${date} failed (non-fatal for today, weekly loses this day): ${err}`);
+  }
+
+  let edition: Edition = 'daily';
+  let promptClusters: StoryCluster[];
+  let params: Record<string, unknown>;
+  const week = isWeeklyDate(date) ? await loadWeek(env, date, clusters) : [];
+  if (week.length >= MIN_WEEKLY_DAYS) {
+    edition = 'weekly';
+    promptClusters = week.flatMap(d => d.clusters);
+    params = buildWeeklyRequest(week);
+  } else {
+    if (isWeeklyDate(date)) {
+      console.warn(`[StageB] Only ${week.length} day(s) of cluster data — sending the daily instead of the weekly`);
+    }
+    promptClusters = pickDailyCandidates(clusters);
+    params = buildDailyRequest(promptClusters, state.weather, state.markets, date);
+  }
+  console.log(`[StageB] Edition=${edition}: ${promptClusters.length} candidate clusters in the compile prompt`);
+
+  const phase1: Phase1Output = {
+    date,
+    edition,
+    clusters: promptClusters,
+    selectedInput: { sections: [] },
+    triagedStories: clustersToTriaged(promptClusters),
+    weather: state.weather,
+    markets: state.markets,
+    feedStats: state.feedStats,
+    storyImages: storyImagesFor(promptClusters),
+    interestItems: state.interestItems,
+  };
+  await env.DIGEST_KV.put(`phase1:${date}`, JSON.stringify(phase1), { expirationTtl: PHASE1_TTL_SECONDS });
+  await env.DIGEST_KV.put('digest:phase1Success', date);
+
+  // Kept so a retry can resubmit the identical request on the fallback model.
+  await env.DIGEST_KV.put(`compile:request:${date}`, JSON.stringify(params), { expirationTtl: PHASE1_TTL_SECONDS });
+  await submitEditionCompile(env, date, edition, params, 0, state.testMode);
+  await env.DIGEST_KV.put('digest:stageBSuccess', date, { expirationTtl: PHASE1_TTL_SECONDS });
+}
+
+async function submitEditionCompile(
+  env: Env,
+  date: string,
+  edition: Edition,
+  params: Record<string, unknown>,
+  retryCount: number,
+  testMode: boolean | undefined,
+): Promise<void> {
+  const customId = customIdForCompile(date);
+  const { id: batchId } = await submitBatch(env, [{ custom_id: customId, params }]);
+  console.log(`[Edition] Submitted ${edition} compile batch ${batchId} (model=${params.model}, retry=${retryCount})`);
+  const compileState: CompileBatchState = {
+    batchId,
+    submittedAt: Date.now(),
+    customId,
+    retryCount,
+    testMode,
+    edition,
+  };
+  await env.DIGEST_KV.put(`batch:compile:${date}`, JSON.stringify(compileState), {
+    expirationTtl: PHASE1_TTL_SECONDS,
+  });
+  await env.DIGEST_QUEUE.send(
+    { kind: 'poll-compile', date, attempt: 1, testMode: testMode || undefined },
+    { delaySeconds: testMode ? 30 : retryCount > 0 ? 180 : 300 },
+  );
+}
+
+// Stage C for an edition batch: one resubmit (on the fallback model) for an
+// errored / refused / truncated / unparseable result, then alarm.
+async function handleEditionResult(
+  env: Env,
+  date: string,
+  state: CompileBatchState,
+  record: BatchResultRecord,
+  testMode: boolean,
+): Promise<boolean> {
+  const edition = state.edition ?? 'daily';
+  const message = record.result.message;
+  let problem: string | null = null;
+  let parsed: unknown;
+  if (record.result.type !== 'succeeded' || !message) {
+    problem = `result=${record.result.type} ${JSON.stringify(record.result.error ?? {}).slice(0, 300)}`;
+  } else if (message.stop_reason !== 'end_turn') {
+    problem = `stop_reason=${message.stop_reason}` +
+      (message.stop_details ? ` ${JSON.stringify(message.stop_details)}` : '');
+  } else {
+    try {
+      parsed = JSON.parse(extractText(record));
+    } catch (err) {
+      problem = `unparseable output: ${err instanceof Error ? err.message : err}`;
+    }
+  }
+  if (message?.usage) {
+    console.log(`[Edition] ${edition} usage: in=${message.usage.input_tokens} out=${message.usage.output_tokens} model=${message.model}`);
+  }
+
+  if (problem) {
+    if (state.retryCount >= 1) {
+      const msg = `[Edition] ABORTING — ${edition} compile failed twice (date=${date}, batchId=${state.batchId}): ${problem}`;
+      console.error(msg);
+      await sendErrorEmail(env, msg).catch(() => undefined);
+      return true;
+    }
+    console.warn(`[Edition] ${edition} compile problem (${problem}) — resubmitting on ${EDITORIAL_FALLBACK_MODEL}`);
+    const raw = await env.DIGEST_KV.get(`compile:request:${date}`);
+    if (!raw) throw new Error(`[Edition] Cannot resubmit — compile:request:${date} missing from KV`);
+    const params = { ...(JSON.parse(raw) as Record<string, unknown>), model: EDITORIAL_FALLBACK_MODEL };
+    await submitEditionCompile(env, date, edition, params, state.retryCount + 1, state.testMode);
+    return false;
+  }
+
+  await runStageCSendEdition(env, date, edition, parsed, testMode);
+  return true;
+}
+
+async function runStageCSendEdition(
+  env: Env,
+  date: string,
+  edition: Edition,
+  raw: unknown,
+  testMode: boolean,
+): Promise<void> {
+  const phase1Raw = await env.DIGEST_KV.get(`phase1:${date}`);
+  if (!phase1Raw) throw new Error(`[StageC] phase1:${date} missing — Stage B did not write it`);
+  const phase1 = JSON.parse(phase1Raw) as Phase1Output;
+  const clusters = phase1.clusters ?? [];
+
+  const opts: EditionRenderOptions = {
+    websiteUrl: WEBSITE_URL,
+    dateString: date,
+    feedStats: { total: phase1.feedStats.total, failed: phase1.feedStats.failed },
+    weather: phase1.weather,
+    markets: phase1.markets,
+  };
+  let assembled;
+  if (edition === 'weekly') {
+    const weekly = normaliseWeeklyEdition(raw, clusters);
+    if (weekly.stories.length === 0) throw new Error(`[StageC] weekly edition for ${date} has no usable stories`);
+    console.log(`[StageC] Weekly: ${weekly.stories.length} storylines, ${weekly.alsoThisWeek.length} also-this-week`);
+    assembled = assembleWeeklyEdition(weekly, clusters, opts);
+  } else {
+    const daily = normaliseDailyEdition(raw, clusters);
+    if (daily.sections.length === 0) throw new Error(`[StageC] daily edition for ${date} has no usable sections`);
+    console.log(`[StageC] Daily sections: ${daily.sections.map(s => `${s.kind}(${s.stories.length})`).join(' ')}`);
+    assembled = assembleDailyEdition(daily, clusters, opts);
+  }
+
+  await persistDigest(env, phase1, {
+    digestMarkdown: assembled.fullDigestEn,
+    emailMarkdown: assembled.briefingEn,
+    digestMarkdownPl: assembled.fullDigestPl,
+    emailMarkdownPl: assembled.briefingPl,
+  });
+
+  let inlineImage: InlineImage | undefined;
+  if (env.ENABLE_DIGEST_IMAGE === 'true') {
+    const img = await generateDigestImage(env, assembled.briefingEn).catch(err => {
+      console.log(`[StageC] Image generation threw (non-fatal): ${err instanceof Error ? err.message : err}`);
+      return null;
+    });
+    if (img) inlineImage = img;
+  }
+
+  await sendAllEmails(env, assembled.briefingEn, assembled.briefingPl, {
+    testMode,
+    inlineImage,
+    interestItems: phase1.interestItems,
+    edition,
+    date,
+  });
+
+  try {
+    await env.DIGEST_KV.put('digest:lastSuccess', date);
+  } catch (err) {
+    console.error(`[StageC] Heartbeat write failed (non-fatal): ${err}`);
+  }
+  await pingExternalHeartbeat(env);
+  console.log(`[StageC] ${edition} complete for ${date}`);
+}
+
 // Stage C core: poll the day's Sonnet compile batch and either re-enqueue
 // or run assembleAll + send. Returns true when done (ack), false when
 // re-enqueued.
@@ -1190,6 +1433,10 @@ async function pollCompileOnce(env: Env, date: string, attempt: number, testMode
   const record = results.get(state.customId);
   if (!record) {
     throw new Error(`[PollCompile] No result for ${state.customId} in batch ${state.batchId}`);
+  }
+
+  if (state.edition) {
+    return handleEditionResult(env, date, state, record, testMode);
   }
 
   if (record.result.type !== 'succeeded') {
@@ -1633,6 +1880,7 @@ async function persistDigest(
       succeeded: phase1.feedStats.succeeded,
     },
     storyImages: phase1.storyImages,
+    ...(phase1.edition ? { edition: phase1.edition } : {}),
     ...(partial.digestMarkdown ? { digestMarkdown: partial.digestMarkdown } : {}),
     ...(partial.emailMarkdown ? { emailMarkdown: partial.emailMarkdown } : {}),
     ...(partial.digestMarkdownPl ? { digestMarkdownPl: partial.digestMarkdownPl } : {}),
@@ -1669,6 +1917,10 @@ interface SendOptions {
   // in src/interests.ts decides per-recipient whether a block is appended —
   // absent / empty means no recipient gets a per-person section.
   interestItems?: Record<string, CuratedInterestItem[]>;
+  // Picks the subject lines. Absent = daily.
+  edition?: Edition;
+  // Digest date (YYYY-MM-DD) the subjects describe; defaults to today (UTC).
+  date?: string;
 }
 
 // Dispatch the English digest + every Polish recipient. Used by both the
@@ -1726,7 +1978,13 @@ async function sendAllEmails(
     month: 'long',
     year: 'numeric',
   });
-  const plSubject = `Codzienny Przegląd Wiadomości — ${plDateStr}`;
+  const isWeekly = opts.edition === 'weekly';
+  const subjectDate = opts.date ?? todayUtc();
+  const plSubject = isWeekly
+    ? `Przegląd Tygodnia — ${weekRangeLabel(subjectDate, 'pl')}`
+    : `Codzienny Przegląd Wiadomości — ${plDateStr}`;
+  // undefined → sendDigestEmail's default "Daily News Digest — {date}".
+  const enSubject = isWeekly ? `Weekly Review — ${weekRangeLabel(subjectDate, 'en')}` : undefined;
 
   const baselineLabel = BASELINE_CONFIG.label;
   const ownerEmail = normalizeEmail(EMAIL_TO.email);
@@ -1752,7 +2010,7 @@ async function sendAllEmails(
     if (isPl) {
       await sendDigestEmail(env, polishBriefing, undefined, opts.onlyTo, plSubject, baselineLabel, unsubToken);
     } else {
-      await sendDigestEmail(env, enBriefingFor(opts.onlyTo.email), undefined, opts.onlyTo, undefined, baselineLabel, unsubToken, imageForOwner(opts.onlyTo.email));
+      await sendDigestEmail(env, enBriefingFor(opts.onlyTo.email), undefined, opts.onlyTo, enSubject, baselineLabel, unsubToken, imageForOwner(opts.onlyTo.email));
     }
     console.log(`[Email] Sent to single recipient ${opts.onlyTo.email}`);
     return;
@@ -1767,7 +2025,7 @@ async function sendAllEmails(
     console.log('[Email] Test mode — sending only to Filip');
     const filip: DigestRecipient = { email: normalizeEmail(EMAIL_TO.email), name: EMAIL_TO.name, lang: 'en' };
     const unsubToken = await deriveUnsubToken(env, filip.email, 'en');
-    await sendDigestEmail(env, enBriefingFor(filip.email), undefined, filip, undefined, baselineLabel, unsubToken, imageForOwner(filip.email));
+    await sendDigestEmail(env, enBriefingFor(filip.email), undefined, filip, enSubject, baselineLabel, unsubToken, imageForOwner(filip.email));
     return;
   }
 
@@ -1780,7 +2038,7 @@ async function sendAllEmails(
       enBriefingFor(recipient.email),
       undefined,
       { email: recipient.email, name: recipient.name },
-      undefined,
+      enSubject,
       baselineLabel,
       unsubToken,
       image,
@@ -2065,6 +2323,8 @@ async function handleQueue(batch: MessageBatch<QueueMessage>, env: Env): Promise
           testMode: body.testMode,
           onlyTo: body.onlyTo,
           interestItems,
+          edition: data.edition,
+          date: body.date,
         });
         msg.ack();
       } else {
@@ -2502,7 +2762,7 @@ export default {
               // ignore — sync resend continues without interest sections
             }
           }
-          await sendAllEmails(env, data.emailMarkdown, polish, { testMode, onlyTo, interestItems });
+          await sendAllEmails(env, data.emailMarkdown, polish, { testMode, onlyTo, interestItems, edition: data.edition, date });
           return new Response(
             JSON.stringify({ status: 'sent', date, testMode, onlyTo: onlyTo?.email ?? 'all' }),
             { headers: JSON_HEADERS },
